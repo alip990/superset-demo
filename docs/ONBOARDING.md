@@ -57,10 +57,46 @@ Idempotency: helper `find(resource, col, value)` looks up by name/slug. Renaming
 
 Important: the RLS clause is applied to **every dataset** in the dashboard, so all datasets need a `region` column.
 
-### 2.4 Map server
+### 2.4 Map server (no plugin needed)
 
-- Tiles: Planetiler converts the OSM Iran extract to `tiles/iran.mbtiles`; `tileserver-gl` serves it.
-- Superset's deck.gl `mapbox_style` only accepts `mapbox://styles/...` or `tile://http(s)://...` raster URLs. We use `tile://http://localhost:8081/styles/basic-preview/{z}/{x}/{y}.png`. This URL must be reachable **from the user's browser**, hence `localhost:8081`, not the Docker hostname.
+The map is **not** a custom plugin. It is Superset's built-in deck.gl *Scatterplot* chart (`deck_scatter`) plus a **self-hosted base map**. Superset only needs a tile URL, so the whole integration is a config value, one chart parameter and one extra container.
+
+**Pipeline**
+
+```
+OSM Iran extract (.osm.pbf, Geofabrik)
+        │  Planetiler (one-off, offline)
+        ▼
+tiles/iran.mbtiles ──mounted──► tileserver-gl (:8081) ──HTTP──► browser ──► Superset deck.gl map
+                                   serves /styles/basic-preview/{z}/{x}/{y}.png
+```
+
+1. **Build the tiles (offline, once).** Planetiler turns the OSM extract into an MBTiles file (`tiles/iran.mbtiles`, ~580 MB). It is git-ignored; see the README for the command. Rebuild only if you want fresher OSM data.
+2. **Serve them.** `docker-compose.yml` runs `maptiler/tileserver-gl` with `--file /data/iran.mbtiles -p 8080 -u http://localhost:8081`. `-u` is the *public* URL the server embeds in its responses, so it must be what the browser can reach (host port 8081), not the Docker-internal name. The server renders the vector tiles into raster PNGs through its built-in `basic-preview` style.
+3. **Point Superset at it.** In `superset/superset_config.py`:
+   ```python
+   TILE_SERVER = os.environ.get("TILE_SERVER_PUBLIC_URL", "http://localhost:8081")
+   DECKGL_BASE_MAP = [[f"tile://{TILE_SERVER}/styles/basic-preview/{{z}}/{{x}}/{{y}}.png", "Own map server (Iran, basic)"]]
+   MAPBOX_API_KEY = ""
+   ```
+   `DECKGL_BASE_MAP` adds our server to the base-map dropdown in deck.gl charts. Emptying `MAPBOX_API_KEY` means no request ever goes to Mapbox.
+4. **Use it in the chart.** `superset/bootstrap.py` sets `mapbox_style` on the `deck_scatter` chart to the same `tile://...` URL, with the viewport centred on Iran (lon 53.7, lat 32.4, zoom 4.4). Points come from the `sales_by_branch` dataset (`lat`, `lon`, `SUM(amount)`).
+5. **Browser fetches tiles directly.** Tile requests go from the user's browser to `localhost:8081`, not through Superset. That is why the tileserver publishes a port and why it also works inside the embedded iframe.
+
+**Why raster `tile://` and not a MapLibre style.json?** Superset's `mapbox_style` field validates its input and only accepts `mapbox://styles/...` or `tile://http(s)://...` (raster XYZ). A bare `style.json` URL is silently rejected and no base map is drawn. So we let tileserver-gl do the vector-to-raster rendering and give Superset plain XYZ PNG tiles.
+
+**Trade-offs of this approach**
+- Raster tiles: no client-side restyling, no rotating/pitching a crisp vector map, and less sharp on high-DPI screens.
+- Only Iran is covered; outside the extract the map is blank.
+- Styling is limited to what tileserver-gl's styles offer. A different look means supplying your own style (mount it into the tileserver and change the `/styles/<name>/` part of the URL in **both** `superset_config.py` and `bootstrap.py`).
+- The map data must stay in sync between those two files, since the chart stores its own copy of the URL.
+
+**When would a plugin be needed?** Only if you want true vector rendering (MapLibre GL), custom layers or interactions the built-in deck.gl charts do not offer. See section 3. For this demo the built-in chart plus config was enough, and it avoids building Superset's frontend from source.
+
+**Checking it works**
+- `http://localhost:8081` lists the available styles/data.
+- `http://localhost:8081/styles/basic-preview/5/20/12.png` should return a PNG tile.
+- If points appear on a blank/grey background, the chart works but the tile URL is unreachable or the style name is wrong.
 
 ## 3. Plugins
 
@@ -71,7 +107,7 @@ There are two things people call "plugin" here; pick the right one:
 | You want | Approach |
 |---|---|
 | A new chart type (custom visualization) | Superset **viz plugin** (React/TypeScript), below |
-| Different base map / styling | No plugin: edit `DECKGL_BASE_MAP` in `superset_config.py` |
+| Different base map / styling | No plugin: edit `DECKGL_BASE_MAP` in `superset_config.py` (see section 2.4) |
 | Custom auth, security rules, Jinja macros | Python config hooks in `superset_config.py` (`CUSTOM_SECURITY_MANAGER`, `JINJA_CONTEXT_ADDONS`), no frontend build |
 
 ### 3.1 Building a custom viz plugin
