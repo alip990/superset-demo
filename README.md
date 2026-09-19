@@ -155,6 +155,10 @@ docker compose down        # stop, keep data
 docker compose down -v     # stop and wipe the Postgres volume
 ```
 
+## Onboarding
+
+New to the project? Read **[docs/ONBOARDING.md](docs/ONBOARDING.md)**: how each piece is implemented, the plugin guide, common tasks, troubleshooting and known limitations.
+
 ## Project Layout
 
 ```
@@ -165,9 +169,10 @@ docker compose down -v     # stop and wipe the Postgres volume
 │   ├── Dockerfile            # Superset 6.1.0 + psycopg2
 │   ├── superset_config.py    # fa locale, feature flags, embedding, base map
 │   └── bootstrap.py          # provisions charts, dashboard, roles, users, RLS
+├── docs/ONBOARDING.md        # implementation guide for new teammates
 ├── embed-app/                # Flask host app (guest tokens + iframe)
 ├── tiles/                    # iran.mbtiles goes here (git-ignored)
-└── plugins/                  # reserved for custom Superset plugins
+└── plugins/                  # reserved for custom viz plugins (empty today)
 ```
 
 ## Security Note
