@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8"><title>اپلیکیشن میزبان — داشبورد تعبیه‌شده</title>
+  <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
+  <style>
+    body { font-family: Vazirmatn, Tahoma, sans-serif; margin: 0; background: #f4f5f7; }
+    header { background: #1f2a44; color: #fff; padding: 12px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    select { font: inherit; padding: 4px 8px; }
+    code { background: #0002; padding: 2px 6px; border-radius: 4px; direction: ltr; display: inline-block; }
+    #dashboard { height: calc(100vh - 60px); }
+    #dashboard iframe { width: 100%; height: 100%; border: 0; }
+  </style>
+</head>
+<body>
+<header>
+  <strong>اپلیکیشن ما</strong>
+  <label>کاربر جاری:
+    <select id="user">
+      {% for k, u in users.items() %}<option value="{{k}}" {% if k == current %}selected{% endif %}>{{u.name}}</option>{% endfor %}
+    </select>
+  </label>
+  <span>فیلتر اجباری (RLS در Guest Token): <code id="rls">…</code></span>
+</header>
+<div id="dashboard"></div>
+<script src="https://cdn.jsdelivr.net/npm/@superset-ui/embedded-sdk@0.2.0/bundle/index.js"></script>
+<script>
+  async function fetchGuestToken() {
+    const r = await fetch('/guest-token'); const j = await r.json();
+    document.getElementById('rls').textContent = j.rls.length ? j.rls[0].clause : 'بدون محدودیت';
+    return j.token;
+  }
+  function mount() {
+    document.getElementById('dashboard').innerHTML = '';
+    supersetEmbeddedSdk.embedDashboard({
+      id: "{{ dashboard_uuid }}",
+      supersetDomain: "{{ superset_url }}",
+      mountPoint: document.getElementById('dashboard'),
+      fetchGuestToken,
+      dashboardUiConfig: { hideTitle: false, filters: { expanded: false } },
+    });
+  }
+  document.getElementById('user').onchange = async (e) => {
+    await fetch('/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({user: e.target.value})});
+    mount();
+  };
+  mount();
+</script>
+</body>
+</html>

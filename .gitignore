@@ -1,0 +1,6 @@
+# Large generated map tiles (build locally, see README)
+tiles/*.mbtiles
+tiles/data/
+*.log
+.env
+__pycache__/
