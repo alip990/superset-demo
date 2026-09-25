@@ -7,7 +7,10 @@ SQLALCHEMY_DATABASE_URI = "postgresql+psycopg2://postgres:postgres@db:5432/super
 REDIS_URL = "redis://redis:6379"
 CACHE_CONFIG = {"CACHE_TYPE": "RedisCache", "CACHE_DEFAULT_TIMEOUT": 300,
                 "CACHE_KEY_PREFIX": "superset_", "CACHE_REDIS_URL": f"{REDIS_URL}/0"}
-DATA_CACHE_CONFIG = {**CACHE_CONFIG, "CACHE_KEY_PREFIX": "superset_data_"}
+# Chart-data caching is OFF: the tenant filter comes from get_guest_user_attribute()
+# (see below), which Superset does not include in its cache key - with a data cache,
+# one company could be served another company's cached results.
+DATA_CACHE_CONFIG = {"CACHE_TYPE": "NullCache"}
 
 # ---- Persian localisation ----
 BABEL_DEFAULT_LOCALE = "fa"
@@ -55,3 +58,29 @@ SESSION_COOKIE_SAMESITE = "Lax"
 WTF_CSRF_ENABLED = True
 
 FAB_ADD_SECURITY_API = True  # /api/v1/security/roles, users ... for automation
+
+
+# ---- Company-tree tenancy for embedded dashboards (see SUPERSET_RLS_GUIDE.md) ----
+# Superset 6.1 drops user.attributes from guest-token requests, so the host app
+# packs the allowed company ids into the username: "<app user>|<id>, <id>, ...".
+def get_guest_user_attribute(attribute_name, default=None):
+    """Polyfill for SIP-174's get_guest_user_attribute Jinja macro."""
+    from flask import g
+
+    if hasattr(g, "user") and hasattr(g.user, "guest_token"):
+        user_payload = g.user.guest_token.get("user", {})
+
+        # 1. native attributes, for Superset versions that keep them
+        attributes = user_payload.get("attributes") or {}
+        if attribute_name in attributes:
+            return attributes[attribute_name]
+
+        # 2. fallback: unpack the ids packed into the username
+        username = user_payload.get("username", "")
+        if "|" in username and attribute_name == "allowed_companies":
+            return username.split("|", 1)[1].strip()
+
+    return default
+
+
+JINJA_CONTEXT_ADDONS = {"get_guest_user_attribute": get_guest_user_attribute}

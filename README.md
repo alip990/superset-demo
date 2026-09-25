@@ -60,22 +60,22 @@ sequenceDiagram
     actor U as End user (browser)
     participant EA as embed-app (:8090)
     participant SS as Superset (:8088)
-    participant PG as Postgres (demo DB)
+    participant PG as Postgres (backup-db)
     participant TS as tileserver (:8081)
 
-    U->>EA: GET / (pick user, e.g. ali_north)
-    EA->>SS: login as admin, GET dashboard/sales-fa/embedded
+    U->>EA: GET / (pick user, e.g. police_qom)
+    EA->>SS: login as admin, GET dashboard/traffic-fa-embedded/embedded
     SS-->>EA: embedded dashboard UUID
     EA-->>U: HTML page with iframe SDK
 
     U->>EA: GET /guest-token
-    EA->>EA: build RLS clause from user's regions
-    EA->>SS: POST /security/guest_token/ (dashboard UUID + RLS)
+    EA->>PG: recursive CTE: user's company + all descendants
+    EA->>SS: POST /security/guest_token/ (username "police_qom|<ids>", rls: [])
     SS-->>EA: signed JWT guest token
     EA-->>U: token
 
     U->>SS: load embedded dashboard (iframe, guest token)
-    SS->>PG: chart queries + RLS filter (region IN ...)
+    SS->>PG: virtual-dataset SQL: company_id IN (get_guest_user_attribute(...))
     PG-->>SS: only rows the user may see
     SS-->>U: charts render
     U->>TS: GET /styles/basic-preview/{z}/{x}/{y}.png
@@ -146,7 +146,12 @@ The dashboard slug is `sales-fa` (`http://localhost:8088/superset/dashboard/sale
 | `sara_south` | south, center |
 | `manager` | north, south, center, east, west |
 
-In the embedded app the same users' regions are turned into a dynamic guest-token RLS clause instead.
+The embedded app (http://localhost:8090) shows the traffic dashboard `traffic-fa-embedded` on the restored
+backup data, scoped by the **company tree**: `police_national` sees everything, `police_qom` and
+`police_tehran` only their province. See [SUPERSET_RLS_GUIDE.md](SUPERSET_RLS_GUIDE.md).
+
+Direct logins `traffic_national`, `traffic_qom` and `traffic_tehran` see the same split on the
+`traffic-fa` dashboard through a regular RLS rule.
 
 ### Stop and reset
 
@@ -172,7 +177,10 @@ Three ideas to hold on to:
 1. **Everything is configuration-as-code.** No manual clicking in Superset. `superset/bootstrap.py` calls Superset's REST API to create the connection, datasets, charts, dashboard, roles, users and RLS rule. Re-running it is safe (it looks things up first and updates).
 2. **Two kinds of row-level security**, one per access path:
    - *Direct Superset login* → an RLS rule with Jinja: `region IN (SELECT region FROM user_access WHERE username = '{{ current_username() }}')`.
-   - *Embedded (guest token)* → the host app sends an RLS clause inside the token: `region IN ('north')`.
+   - *Embedded (guest token)* → the host app packs the user's allowed company ids (their company and all
+     companies below it) into the token's username; virtual datasets filter on
+     `get_guest_user_attribute('allowed_companies')`. The token's `rls` is empty. See
+     [SUPERSET_RLS_GUIDE.md](SUPERSET_RLS_GUIDE.md).
 3. **The map is self-hosted.** No Mapbox key; base tiles come from our own tileserver.
 
 ### Where each thing is implemented
@@ -184,7 +192,9 @@ Three ideas to hold on to:
 | Superset image | `superset/Dockerfile` | Stock `apache/superset:6.1.0` + `psycopg2-binary` |
 | Superset settings | `superset/superset_config.py` | Persian locale, feature flags, embedding/CORS, guest-token settings, deck.gl base map |
 | Provisioning | `superset/bootstrap.py` | REST API calls (connection, datasets, charts, dashboard layout, embedding) then ORM code for roles/users/RLS |
-| Host app | `embed-app/app.py`, `embed-app/index.html` | Fake users, guest-token endpoint, iframe via `@superset-ui/embedded-sdk` |
+| Host app | `embed-app/app.py`, `embed-app/index.html` | Fake users, company-tree CTE, guest-token endpoint, iframe via `@superset-ui/embedded-sdk` |
+| Backup data + BI layer | `backups/restore.sh`, `backups/02-bi.sql` | Restores the beta backup into `backup-db` (:5441) and builds schema `bi` (company tree, `violation` fact table) |
+| Traffic dashboards | `superset/bootstrap_traffic.py` | `traffic-fa` (direct login, RLS) and `traffic-fa-embedded` (scoped virtual datasets) |
 | Startup ordering | `docker-compose.yml` | `db` healthy → `superset-init` → `superset` healthy → `superset-bootstrap` |
 
 #### Persian + Jalali
@@ -208,7 +218,9 @@ Idempotency: helper `find(resource, col, value)` looks up by name/slug. Renaming
 
 1. Page load: app logs in to Superset as admin and reads the dashboard's embedded UUID.
 2. The SDK calls `fetchGuestToken()` → `GET /guest-token`.
-3. The app maps the current app user to regions and posts to `/api/v1/security/guest_token/` with `resources` (the dashboard) and `rls` clauses.
+3. The app looks up the user's company, flattens the company tree below it with a recursive CTE
+   (`bi.company` in `backup-db`), and posts to `/api/v1/security/guest_token/` with username
+   `"<user>|<id>, <id>, ..."`, `resources` (the dashboard) and `"rls": []`.
 4. Superset returns a signed JWT (`GUEST_TOKEN_JWT_SECRET`, 10 min expiry, role `EmbedGuest`); the iframe uses it.
 5. Switching the user in the dropdown re-mounts the iframe with a new token.
 

@@ -74,10 +74,16 @@ services:
     command: python /srv/app.py
     working_dir: /srv
     volumes: ["./embed-app:/srv:ro"]
-    environment: {SUPERSET_URL: http://superset:8088, SUPERSET_PUBLIC_URL: http://localhost:8088}
+    environment:
+      SUPERSET_URL: http://superset:8088
+      SUPERSET_PUBLIC_URL: http://localhost:8088
+      EMBED_DASHBOARD_SLUG: traffic-fa-embedded
+      # company tree used to compute allowed_companies for the guest token
+      COMPANY_DB_URL: postgresql://bi_reader:bi_reader@backup-db:5432/CrimeManagementDb
     ports: ["8090:8090"]
     depends_on:
       superset: {condition: service_healthy}
+      backup-db: {condition: service_healthy}
 
 volumes:
   pgdata:

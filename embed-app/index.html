@@ -20,14 +20,14 @@
       {% for k, u in users.items() %}<option value="{{k}}" {% if k == current %}selected{% endif %}>{{u.name}}</option>{% endfor %}
     </select>
   </label>
-  <span>فیلتر اجباری (RLS در Guest Token): <code id="rls">…</code></span>
+  <span>شرکت‌های مجاز (allowed_companies): <code id="allowed">…</code></span>
 </header>
 <div id="dashboard"></div>
 <script src="https://cdn.jsdelivr.net/npm/@superset-ui/embedded-sdk@0.2.0/bundle/index.js"></script>
 <script>
   async function fetchGuestToken() {
     const r = await fetch('/guest-token'); const j = await r.json();
-    document.getElementById('rls').textContent = j.rls.length ? j.rls[0].clause : 'بدون محدودیت';
+    document.getElementById('allowed').textContent = j.allowed_companies;
     return j.token;
   }
   function mount() {
