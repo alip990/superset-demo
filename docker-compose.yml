@@ -4,7 +4,9 @@ x-superset: &superset
   image: superset-demo:6.1.0-pg
   environment:
     SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
-    TILE_SERVER_PUBLIC_URL: http://localhost:8081
+    # No local tile server / iran.mbtiles available (ghcr.io was unreachable for
+    # planetiler) - use OpenStreetMap's public raster tiles instead.
+    MAP_TILE_URL: https://tile.openstreetmap.org/{z}/{x}/{y}.png
   volumes:
     - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
     - ./superset/bootstrap.py:/app/bootstrap.py:ro
@@ -21,6 +23,20 @@ services:
       - pgdata:/var/lib/postgresql/data
     ports: ["5440:5432"]
     healthcheck: {test: ["CMD", "pg_isready", "-U", "postgres"], interval: 5s, retries: 20}
+
+  # restored copy of the 1 May beta backup (pg_dumpall, Postgres 14) - see backups/
+  backup-db:
+    image: postgres:14
+    environment: {POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres}
+    volumes:
+      - ./backups:/backups:ro
+      - ./backups/restore.sh:/docker-entrypoint-initdb.d/01-restore.sh:ro
+      - ./backups/02-bi.sql:/docker-entrypoint-initdb.d/02-bi.sql:ro
+      - backupdata:/var/lib/postgresql/data
+    ports: ["5441:5432"]
+    # TCP check: during the first-start restore Postgres only listens on the unix socket,
+    # so this stays unhealthy until the restore and BI build are done
+    healthcheck: {test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], interval: 10s, retries: 120}
 
   redis:
     image: redis:7-alpine
@@ -42,17 +58,15 @@ services:
   # creates DB connection, datasets, charts, dashboards, roles, users, RLS, embedding
   superset-bootstrap:
     <<: *superset
-    command: python /app/bootstrap.py
-    environment: {SUPERSET_URL: http://superset:8088, TILE_SERVER_PUBLIC_URL: http://localhost:8081}
+    command: bash -c "python /app/bootstrap.py && python /app/bootstrap_traffic.py"
+    environment: {SUPERSET_URL: http://superset:8088, MAP_TILE_URL: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"}
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./superset/bootstrap.py:/app/bootstrap.py:ro
+      - ./superset/bootstrap_traffic.py:/app/bootstrap_traffic.py:ro
     depends_on:
       superset: {condition: service_healthy}
-
-  # our own map server: vector tiles built from OSM (Iran extract) via planetiler
-  tileserver:
-    image: maptiler/tileserver-gl:v5.3.1
-    command: ["--file", "/data/iran.mbtiles", "-p", "8080", "-u", "http://localhost:8081"]
-    volumes: ["./tiles:/data"]
-    ports: ["8081:8080"]
+      backup-db: {condition: service_healthy}
 
   # host application that embeds a dashboard in an iframe using guest tokens
   embed-app:
@@ -67,3 +81,4 @@ services:
 
 volumes:
   pgdata:
+  backupdata:

@@ -29,9 +29,15 @@ FEATURE_FLAGS = {
 #   "mapbox://styles/..." (needs MAPBOX_API_KEY) or "tile://http(s)://..." (raster XYZ).
 #   A bare MapLibre style.json URL fails Superset's own validation and silently
 #   renders no basemap - use the tileserver's raster tile endpoint instead.
+# MAP_TILE_URL may point at our own tileserver (default) or, when that isn't
+# available (e.g. no network access to build tiles/iran.mbtiles), a public
+# XYZ tile provider such as OpenStreetMap.
 TILE_SERVER = os.environ.get("TILE_SERVER_PUBLIC_URL", "http://localhost:8081")
+MAP_TILE_URL = os.environ.get(
+    "MAP_TILE_URL", f"{TILE_SERVER}/styles/basic-preview/{{z}}/{{x}}/{{y}}.png"
+)
 DECKGL_BASE_MAP = [
-    [f"tile://{TILE_SERVER}/styles/basic-preview/{{z}}/{{x}}/{{y}}.png", "Own map server (Iran, basic)"],
+    [f"tile://{MAP_TILE_URL}", "Map basemap"],
 ]
 MAPBOX_API_KEY = ""
 

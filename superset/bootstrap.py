@@ -6,7 +6,8 @@ URL = os.environ.get("SUPERSET_URL", "http://superset:8088")
 TILE = os.environ.get("TILE_SERVER_PUBLIC_URL", "http://localhost:8081")
 # Superset's deck.gl "mapbox_style" field requires "mapbox://styles/..." or
 # "tile://http(s)://..." (raster XYZ) - a bare style.json URL is rejected.
-BASEMAP = f"tile://{TILE}/styles/basic-preview/{{z}}/{{x}}/{{y}}.png"
+MAP_TILE_URL = os.environ.get("MAP_TILE_URL", f"{TILE}/styles/basic-preview/{{z}}/{{x}}/{{y}}.png")
+BASEMAP = f"tile://{MAP_TILE_URL}"
 s = requests.Session()
 
 
