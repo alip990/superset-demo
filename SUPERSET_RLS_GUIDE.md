@@ -16,9 +16,12 @@ Companies form a tree. In the demo data, `bi.company` looks like this:
 A user of a company may see that company's data and the data of **every company below it**.
 The national user sees everything. The Qom user sees only Qom.
 
-1. The host application (`embed-app/app.py`) knows each user's own company. Before it asks
-   Superset for a guest token, it walks down the tree with a recursive query and collects the
-   allowed ids, for example `"1346027341989220352"` for Qom, or all three ids for national.
+1. The host application (`embed-app/app.py`) knows each user's own company
+   (`um.UserAttribute.CompanyId` in the user service, copied to `bi.app_user`). The user may
+   narrow the view to a company below their own. Before it asks Superset for a guest token,
+   the application walks down the tree from the selected company with a recursive query and
+   collects the allowed ids, for example `"1346027341989220352"` for Qom, or all three ids for
+   national.
 2. The application sends those ids to Superset inside the guest token. Superset 6.1 drops a
    `user.attributes` field, so the ids are packed into the username instead:
    `"police_qom|1346027341989220352"`. The token's `rls` list is always empty.
@@ -99,14 +102,21 @@ list in the cache key.
 
 ## Checking it
 
-With the stack running, open http://localhost:8090 and switch users. The first KPI should
-read:
+With the stack running, open http://localhost:8090. The page has two dropdowns:
 
-| App user | Allowed companies | Total speed checks |
+- **کاربر (user):** the activated users of the real user service (`um.User`, copied to
+  `bi.app_user`), plus the demo-only **مدیر سامانه** entry that may pick any company.
+- **شرکت (company):** only the user's own company and the companies below it. The default is
+  the user's own company. The backend checks the chosen company again, so a Qom user can't
+  request Tehran by editing the request.
+
+| Selection | allowed_companies | Total speed checks |
 |---|---|---|
-| police_national | all three | 931,335 |
-| police_qom | Qom | 511,392 |
-| police_tehran | Tehran | 419,943 |
+| `fkreza` (national) | all three | 931,335 |
+| `fkreza` → company Tehran | Tehran | 419,943 |
+| `navidahmadian` (Qom) | Qom only; the dropdown offers nothing else | 511,392 |
+| `superadmin` (no company) | none | 0 (failsafe) |
+| مدیر سامانه → Qom | Qom | 511,392 |
 
 A guest token without the packed ids (username without `|`) shows 0 or "No results" on every
 company chart.

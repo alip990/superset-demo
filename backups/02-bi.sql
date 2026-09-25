@@ -10,6 +10,8 @@
 DROP SCHEMA IF EXISTS bi CASCADE;
 DROP SCHEMA IF EXISTS dm_src CASCADE;
 DROP SERVER IF EXISTS device_mgmt CASCADE;
+DROP SCHEMA IF EXISTS um_src CASCADE;
+DROP SERVER IF EXISTS user_mgmt CASCADE;
 
 -- ---------- DeviceManagement tables as foreign tables ----------
 CREATE EXTENSION IF NOT EXISTS postgres_fdw;
@@ -54,6 +56,23 @@ WITH RECURSIVE t AS (
   UNION ALL
   SELECT t.ancestor_id, c.company_id FROM bi.company c JOIN t ON c.parent_id = t.descendant_id
 ) SELECT * FROM t;
+
+-- ---------- real application users (UserManagementDb) and their company ----------
+CREATE SERVER user_mgmt FOREIGN DATA WRAPPER postgres_fdw OPTIONS (dbname 'UserManagementDb');
+CREATE USER MAPPING FOR postgres SERVER user_mgmt OPTIONS (user 'postgres');
+CREATE SCHEMA um_src;
+IMPORT FOREIGN SCHEMA um LIMIT TO ("User", "UserAttribute") FROM SERVER user_mgmt INTO um_src;
+
+-- the embed app lets you pick one of these users; the guest token is scoped to their company subtree
+CREATE TABLE bi.app_user AS
+SELECT u."UserName" AS username, u."FirstName" || ' ' || u."LastName" AS full_name,
+       c.company_id,  -- NULL: user has no (live) company -> sees no data
+       u."Activated" AS activated
+FROM um_src."User" u
+LEFT JOIN um_src."UserAttribute" ua ON ua."UserId" = u."Id" AND NOT ua."Deleted"
+LEFT JOIN bi.company c ON c.company_id = ua."CompanyId"
+WHERE NOT u."Deleted";
+ALTER TABLE bi.app_user ADD PRIMARY KEY (username);
 
 -- which Superset user belongs to which company (used by the company-tree RLS rule,
 -- see superset/bootstrap_traffic.py)

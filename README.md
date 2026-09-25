@@ -63,14 +63,14 @@ sequenceDiagram
     participant PG as Postgres (backup-db)
     participant TS as tileserver (:8081)
 
-    U->>EA: GET / (pick user, e.g. police_qom)
+    U->>EA: GET / (pick user, e.g. navidahmadian, and a company in their subtree)
     EA->>SS: login as admin, GET dashboard/traffic-fa-embedded/embedded
     SS-->>EA: embedded dashboard UUID
     EA-->>U: HTML page with iframe SDK
 
     U->>EA: GET /guest-token
     EA->>PG: recursive CTE: user's company + all descendants
-    EA->>SS: POST /security/guest_token/ (username "police_qom|<ids>", rls: [])
+    EA->>SS: POST /security/guest_token/ (username "navidahmadian|<ids>", rls: [])
     SS-->>EA: signed JWT guest token
     EA-->>U: token
 
@@ -147,8 +147,8 @@ The dashboard slug is `sales-fa` (`http://localhost:8088/superset/dashboard/sale
 | `manager` | north, south, center, east, west |
 
 The embedded app (http://localhost:8090) shows the traffic dashboard `traffic-fa-embedded` on the restored
-backup data, scoped by the **company tree**: `police_national` sees everything, `police_qom` and
-`police_tehran` only their province. See [SUPERSET_RLS_GUIDE.md](SUPERSET_RLS_GUIDE.md).
+backup data, scoped by the **company tree**. Pick one of the backup's real users (e.g. `fkreza` = national,
+`navidahmadian` = Qom, `rezailka` = Tehran), then optionally a company inside that user's subtree. See [SUPERSET_RLS_GUIDE.md](SUPERSET_RLS_GUIDE.md).
 
 Direct logins `traffic_national`, `traffic_qom` and `traffic_tehran` see the same split on the
 `traffic-fa` dashboard through a regular RLS rule.

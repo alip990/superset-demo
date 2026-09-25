@@ -15,12 +15,20 @@
 <body>
 <header>
   <strong>اپلیکیشن ما</strong>
-  <label>کاربر جاری:
+  <label>کاربر:
     <select id="user">
-      {% for k, u in users.items() %}<option value="{{k}}" {% if k == current %}selected{% endif %}>{{u.name}}</option>{% endfor %}
+      <option value="{{ admin }}" {% if admin == current_user %}selected{% endif %}>مدیر سامانه (انتخاب مستقیم شرکت)</option>
+      {% for u in users %}<option value="{{ u.username }}" {% if u.username == current_user %}selected{% endif %}>{{ u.username }} — {{ u.name }} ({{ u.company }})</option>{% endfor %}
     </select>
   </label>
-  <span>شرکت‌های مجاز (allowed_companies): <code id="allowed">…</code></span>
+  <label>شرکت:
+    {# ids are strings: they exceed JavaScript's safe integer range #}
+    <select id="company">
+      {% for c in companies %}<option value="{{ c.id }}" {% if c.id == current_company %}selected{% endif %}>{{ "— " * c.level }}{{ c.title }}</option>{% endfor %}
+      {% if not companies %}<option value="">(این کاربر به هیچ شرکتی متصل نیست)</option>{% endif %}
+    </select>
+  </label>
+  <span>allowed_companies: <code id="allowed">…</code></span>
 </header>
 <div id="dashboard"></div>
 <script src="https://cdn.jsdelivr.net/npm/@superset-ui/embedded-sdk@0.2.0/bundle/index.js"></script>
@@ -40,10 +48,21 @@
       dashboardUiConfig: { hideTitle: false, filters: { expanded: false } },
     });
   }
-  document.getElementById('user').onchange = async (e) => {
-    await fetch('/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({user: e.target.value})});
+  const userSel = document.getElementById('user'), companySel = document.getElementById('company');
+  async function select(company) {
+    await fetch('/login', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                           body: JSON.stringify({user: userSel.value, company})});
     mount();
+  }
+  // new user: offer only the companies in their subtree, defaulting to their own company
+  userSel.onchange = async () => {
+    const r = await fetch('/companies?user=' + encodeURIComponent(userSel.value)); const j = await r.json();
+    companySel.innerHTML = j.companies.length
+      ? j.companies.map(c => `<option value="${c.id}">${'— '.repeat(c.level)}${c.title}</option>`).join('')
+      : '<option value="">(این کاربر به هیچ شرکتی متصل نیست)</option>';
+    select(companySel.value || null);
   };
+  companySel.onchange = () => select(companySel.value || null);
   mount();
 </script>
 </body>
