@@ -81,7 +81,7 @@ sequenceDiagram
 
     U->>EA: GET /guest-token
     EA->>PG: recursive CTE: user's company + all descendants
-    EA->>SS: POST /security/guest_token/ (username "navidahmadian|<ids>", rls: [])
+    EA->>SS: POST /security/guest_token/ (user.attributes.allowed_companies, rls: [])
     SS-->>EA: signed JWT guest token
     EA-->>U: token
 
@@ -281,24 +281,29 @@ Goal: an embedded user sees their own company and every company below it, and no
    the user's company and its descendants. The backend re-checks the chosen company against the user's subtree, so
    editing the request can't reach another company.
 2. On `GET /guest-token` the app walks down the tree from the selected company with a recursive CTE over
-   `bi.company` and joins the ids. Superset 6.1 drops `user.attributes` from guest-token requests, so the ids are
-   **packed into the username**: `"<user>|<id1>, <id2>"`. The token's `"rls"` is `[]`.
-3. `superset/superset_config.py` adds the Jinja macro `get_guest_user_attribute('allowed_companies')`
-   (via `JINJA_CONTEXT_ADDONS`). It reads native attributes if present, otherwise it returns the part of the
-   username after `|`.
+   `bi.company` and sends the ids as a **guest-user attribute**:
+   `{"user": {"username": "<user>", "attributes": {"allowed_companies": [<id>, <id>]}}, "rls": []}`.
+3. `superset/guest_user_attributes.py` is what makes that work on 6.1.0. Released Superset drops
+   `user.attributes` (its marshmallow `UserSchema` excludes unknown fields) and has no macro to read them back;
+   apache/superset **master** has both, unreleased. The module backports the feature - the schema field, the
+   `get_guest_user_attribute()` macro on `ExtraCache`, the macro's entry in `ExtraCache.regex`, and its
+   registration in the template context - and `superset_config.py` installs it from `FLASK_APP_MUTATOR`.
 4. The virtual dataset `violation_scoped` filters with it and **fails closed**:
    ```sql
    SELECT * FROM bi.violation
    WHERE 1=1
-   {% set allowed_companies = get_guest_user_attribute('allowed_companies') %}
+   {% set allowed_companies = get_guest_user_attribute('allowed_companies', escape_result=False) %}
    {% if allowed_companies %}
-     AND company_id IN ({{ allowed_companies }})
+     AND company_id IN {{ allowed_companies | where_in }}
    {% else %}
      AND 1=0 -- Failsafe: if the attribute is missing, return nothing to prevent data leaks
    {% endif %}
    ```
-5. **The data cache is off** (`DATA_CACHE_CONFIG = {"CACHE_TYPE": "NullCache"}`). Superset's cache key does not
-   include the value of a custom macro, so with a cache Qom and Tehran could be served each other's cached results.
+5. **The data cache is on** (Redis). Superset's cache key does not hash the final SQL - it hashes what the macros
+   register through `cache_key_wrapper()`. The backport registers the resolved `allowed_companies`, and adds the
+   macro to `ExtraCache.regex` so `has_extra_cache_key_calls()` re-renders the SQL to pick it up. Skip either half
+   and Qom and Tehran collide on one cache entry; that is why the first version of this demo had to run
+   `NullCache`.
 6. The token-level `rls` is not used because Superset applies it to every dataset on the dashboard, and a dataset
    without `company_id` (like `vehicle`) would then fail.
 
@@ -426,8 +431,8 @@ Three ideas to hold on to:
 1. **Everything is configuration-as-code.** No manual clicking in Superset. `superset/bootstrap.py` calls Superset's REST API to create the connection, datasets, charts, dashboard, roles, users and RLS rule. Re-running it is safe (it looks things up first and updates).
 2. **Two kinds of row-level security**, one per access path:
    - *Direct Superset login* → an RLS rule with Jinja: `region IN (SELECT region FROM user_access WHERE username = '{{ current_username() }}')`.
-   - *Embedded (guest token)* → the host app packs the user's allowed company ids (their company and all
-     companies below it) into the token's username; virtual datasets filter on
+   - *Embedded (guest token)* → the host app puts the user's allowed company ids (their company and all
+     companies below it) in the token as `user.attributes.allowed_companies`; virtual datasets filter on
      `get_guest_user_attribute('allowed_companies')`. The token's `rls` is empty. See
      [SUPERSET_RLS_GUIDE.md](SUPERSET_RLS_GUIDE.md).
 3. **The map is self-hosted.** No Mapbox key; base tiles come from our own tileserver.
@@ -468,8 +473,8 @@ Idempotency: helper `find(resource, col, value)` looks up by name/slug. Renaming
 1. Page load: app logs in to Superset as admin and reads the dashboard's embedded UUID.
 2. The SDK calls `fetchGuestToken()` → `GET /guest-token`.
 3. The app looks up the user's company, flattens the company tree below it with a recursive CTE
-   (`bi.company` in `backup-db`), and posts to `/api/v1/security/guest_token/` with username
-   `"<user>|<id>, <id>, ..."`, `resources` (the dashboard) and `"rls": []`.
+   (`bi.company` in `backup-db`), and posts to `/api/v1/security/guest_token/` with
+   `user.attributes.allowed_companies`, `resources` (the dashboard) and `"rls": []`.
 4. Superset returns a signed JWT (`GUEST_TOKEN_JWT_SECRET`, 10 min expiry, role `EmbedGuest`); the iframe uses it.
 5. Switching the user in the dropdown re-mounts the iframe with a new token.
 
@@ -615,7 +620,8 @@ Notes:
 │   └── 02-bi.sql             # schema bi: company tree, users, vehicles, violation fact table
 ├── superset/
 │   ├── Dockerfile            # Superset 6.1.0 + psycopg2
-│   ├── superset_config.py    # fa locale, feature flags, embedding, base map, get_guest_user_attribute, NullCache
+│   ├── superset_config.py    # fa locale, feature flags, embedding, base map, installs the backport below
+│   ├── guest_user_attributes.py  # backports guest-token user.attributes + the macro onto 6.1.0
 │   ├── bootstrap.py          # provisions the sales charts, dashboard, roles, users, RLS
 │   └── bootstrap_traffic.py  # traffic-fa and traffic-fa-embedded dashboards, RLS, EmbedGuest grants
 ├── embed-app/                # Flask host app (user/company pickers, guest tokens + iframe)
@@ -711,8 +717,8 @@ docker compose exec -T backup-db psql -U postgres -q < backups/02-bi.sql
 
 1. در برنامهٔ نمونه (`embed-app/app.py`، پورت 8090) اول کاربر را انتخاب می‌کنید، بعد شرکت را. فهرست شرکت‌ها فقط شرکت خود کاربر و زیرمجموعه‌هایش را نشان می‌دهد. سرور هم انتخاب را دوباره بررسی می‌کند تا کسی با دست‌کاری درخواست نتواند شرکت دیگری را ببیند.
 2. برنامه با یک پرس‌وجوی بازگشتی (recursive CTE)، شناسهٔ شرکت انتخاب‌شده و همهٔ زیرمجموعه‌هایش را پیدا می‌کند.
-3. برنامه از Superset یک «توکن مهمان» (guest token) می‌گیرد. Superset 6.1 اجازه نمی‌دهد اطلاعات اضافه در توکن بفرستیم، پس شناسه‌ها را **داخل نام کاربری** می‌گذاریم، به این شکل: `"user|id1, id2"`. قسمت `rls` توکن خالی می‌ماند.
-4. در `superset/superset_config.py` تابعی به نام `get_guest_user_attribute('allowed_companies')` تعریف کرده‌ایم که شناسه‌ها را از نام کاربری بیرون می‌کشد.
+3. برنامه از Superset یک «توکن مهمان» (guest token) می‌گیرد و شناسه‌ها را به‌عنوان **ویژگی کاربر** در خود توکن می‌فرستد: `{"user": {"attributes": {"allowed_companies": [id1, id2]}}}`. قسمت `rls` توکن خالی می‌ماند.
+4. نسخه‌های منتشرشدهٔ Superset (از جمله ۶.۱.۰) این ویژگی‌ها را دور می‌ریزند و تابعی برای خواندنشان ندارند؛ این امکان فقط در شاخهٔ master مخزن apache/superset هست و هنوز منتشر نشده. فایل `superset/guest_user_attributes.py` همان کد را به ۶.۱.۰ منتقل می‌کند و `superset_config.py` آن را با `FLASK_APP_MUTATOR` نصب می‌کند. بعد از آن تابع `get_guest_user_attribute('allowed_companies')` در SQL در دسترس است.
 5. dataset مجازی `violation_scoped` با همین تابع فیلتر می‌کند. **اگر شناسه‌ای نباشد، هیچ سطری برنمی‌گرداند** (با `AND 1=0`). یعنی در صورت خطا، به‌جای نشت داده، داشبورد خالی می‌شود.
 
 جزئیات بیشتر و قوانین ساخت dataset برای داشبوردهای embed در [SUPERSET_RLS_GUIDE.md](SUPERSET_RLS_GUIDE.md) است.
@@ -748,15 +754,16 @@ Superset تقویم شمسی ندارد. ما تاریخ را **موقع ساخ�
 - یک قالب‌بند زمان (time formatter) اختصاصی در ظاهر Superset با `Intl.DateTimeFormat('fa-IR-u-ca-persian')` اضافه شود تا برچسب‌ها شمسی نمایش داده شوند.
 - انتخاب‌گر بازهٔ تاریخ همچنان میلادی می‌ماند، مگر اینکه ظاهر Superset بیشتر تغییر کند.
 
-### چرا کش خاموش است؟
+### کش داده: چرا حالا روشن است؟
 
-Superset معمولاً نتیجهٔ نمودارها را کش می‌کند تا دفعهٔ بعد سریع‌تر باشد. اما کلید کش شامل مقدار تابع اختصاصی ما (فهرست شرکت‌ها) نیست. اگر کش روشن باشد، ممکن است نتیجه‌ای که برای قم ساخته شده به کاربر تهران نشان داده شود. برای همین در `superset_config.py` کش داده خاموش است:
+Superset نتیجهٔ نمودارها را کش می‌کند، و کلید کش را از خود SQL نهایی نمی‌سازد؛ از چیزی می‌سازد که توابع قالب با `cache_key_wrapper()` ثبت می‌کنند. تابعی که چیزی ثبت نکند برای کلید کش نامرئی است، و آن وقت نتیجهٔ ساخته‌شده برای قم به کاربر تهران نشان داده می‌شود. در نسخهٔ قبلی این پروژه تابع از `JINJA_CONTEXT_ADDONS` می‌آمد و همین مشکل را داشت، پس کش مجبور بود خاموش باشد.
 
-```python
-DATA_CACHE_CONFIG = {"CACHE_TYPE": "NullCache"}
-```
+`guest_user_attributes.py` هر دو نیمهٔ لازم را درست می‌کند:
 
-**این را روشن نکنید**، مگر اینکه آن تابع طوری تغییر کند که فهرست شرکت‌ها وارد کلید کش شود.
+- تابع به `ExtraCache` همان درخواست وصل می‌شود، پس می‌تواند مقدار `allowed_companies` را در کلید کش همان پرس‌وجو ثبت کند؛
+- نام تابع به `ExtraCache.regex` اضافه می‌شود، چون Superset فقط وقتی SQL یک dataset را برای جمع‌کردن کلیدهای کش دوباره می‌سازد که این الگو در آن SQL پیدا شود.
+
+با این دو، کش داده روی Redis روشن است و هر فهرست شرکت، ورودی کش جداگانهٔ خودش را دارد.
 
 ### اجرا و بررسی
 

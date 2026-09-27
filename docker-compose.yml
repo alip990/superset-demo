@@ -9,6 +9,8 @@ x-superset: &superset
     MAP_TILE_URL: https://tile.openstreetmap.org/{z}/{x}/{y}.png
   volumes:
     - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+    # backports guest-token user.attributes onto 6.1.0; imported by FLASK_APP_MUTATOR
+    - ./superset/guest_user_attributes.py:/app/pythonpath/guest_user_attributes.py:ro
     - ./superset/bootstrap.py:/app/bootstrap.py:ro
   depends_on:
     db: {condition: service_healthy}
@@ -21,7 +23,7 @@ services:
     volumes:
       - ./db/01-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - pgdata:/var/lib/postgresql/data
-    ports: ["5440:5432"]
+    ports: ["127.0.0.1:5440:5432"]
     healthcheck: {test: ["CMD", "pg_isready", "-U", "postgres"], interval: 5s, retries: 20}
 
   # restored copy of the 1 May beta backup (pg_dumpall, Postgres 14) - see backups/
@@ -33,7 +35,7 @@ services:
       - ./backups/restore.sh:/docker-entrypoint-initdb.d/01-restore.sh:ro
       - ./backups/02-bi.sql:/docker-entrypoint-initdb.d/02-bi.sql:ro
       - backupdata:/var/lib/postgresql/data
-    ports: ["5441:5432"]
+    ports: ["127.0.0.1:5441:5432"]
     # TCP check: during the first-start restore Postgres only listens on the unix socket,
     # so this stays unhealthy until the restore and BI build are done
     healthcheck: {test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], interval: 10s, retries: 120}
@@ -62,6 +64,7 @@ services:
     environment: {SUPERSET_URL: http://superset:8088, MAP_TILE_URL: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"}
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./superset/guest_user_attributes.py:/app/pythonpath/guest_user_attributes.py:ro
       - ./superset/bootstrap.py:/app/bootstrap.py:ro
       - ./superset/bootstrap_traffic.py:/app/bootstrap_traffic.py:ro
     depends_on:

@@ -116,19 +116,22 @@ def login():
 @app.get("/guest-token")
 def guest_token():
     username, company = current_selection()
-    allowed = ", ".join(str(c["id"]) for c in company_subtree(company))
+    allowed = [c["id"] for c in company_subtree(company)]
     s = superset_session()
     body = {
-        # Superset 6.1 drops user.attributes, so the ids ride in the username;
-        # superset_config.get_guest_user_attribute('allowed_companies') unpacks them.
-        # No company -> "user|" -> the datasets' failsafe returns no rows.
-        "user": {"username": f"{username}|{allowed}", "first_name": username, "last_name": ""},
+        # The company scope rides in the token as a real guest-user attribute, which
+        # the virtual datasets read back with get_guest_user_attribute(). It needs
+        # superset/guest_user_attributes.py, backporting user.attributes from
+        # apache/superset master - 6.1.0's UserSchema would drop the field.
+        # No company -> [] -> the datasets' failsafe returns no rows.
+        "user": {"username": username, "first_name": username, "last_name": "",
+                 "attributes": {"allowed_companies": allowed}},
         "resources": [{"type": "dashboard", "id": embedded_uuid(s)}],
         "rls": [],  # tenant filtering happens in the virtual datasets, not here
     }
     r = s.post(f"{SUPERSET}/api/v1/security/guest_token/", json=body)
     r.raise_for_status()
-    return jsonify(token=r.json()["token"], allowed_companies=allowed or "—")
+    return jsonify(token=r.json()["token"], allowed_companies=allowed)
 
 
 if __name__ == "__main__":

@@ -62,11 +62,13 @@ def dataset(name, sql=None, schema="bi"):
 
 violation_ds = dataset("violation")
 # tenant-scoped copy for guest tokens: the snippet from SUPERSET_RLS_GUIDE.md
+# escape_result=False because where_in does its own dialect-safe quoting - escaping
+# here as well would quote every id twice.
 violation_scoped_ds = dataset("violation_scoped", sql="""SELECT * FROM bi.violation
 WHERE 1=1
-{% set allowed_companies = get_guest_user_attribute('allowed_companies') %}
+{% set allowed_companies = get_guest_user_attribute('allowed_companies', escape_result=False) %}
 {% if allowed_companies %}
-  AND company_id IN ({{ allowed_companies }})
+  AND company_id IN {{ allowed_companies | where_in }}
 {% else %}
   AND 1=0 -- Failsafe: if the attribute is missing, return nothing to prevent data leaks
 {% endif %}""")

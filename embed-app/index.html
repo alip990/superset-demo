@@ -35,7 +35,7 @@
 <script>
   async function fetchGuestToken() {
     const r = await fetch('/guest-token'); const j = await r.json();
-    document.getElementById('allowed').textContent = j.allowed_companies;
+    document.getElementById('allowed').textContent = j.allowed_companies.join(', ') || '—';
     return j.token;
   }
   function mount() {
