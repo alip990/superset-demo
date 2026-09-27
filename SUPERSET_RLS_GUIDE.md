@@ -1,5 +1,11 @@
 # Company-tree data access for embedded dashboards
 
+<div dir="rtl">
+
+**خلاصهٔ فارسی:** در داشبوردهای embed، هر کاربر فقط دادهٔ شرکت خودش و شرکت‌های زیرمجموعه‌اش را می‌بیند. برنامهٔ میزبان شناسهٔ این شرکت‌ها را داخل توکن مهمان می‌فرستد و هر dataset مجازی باید با `get_guest_user_attribute('allowed_companies')` فیلتر کند؛ اگر شناسه‌ای نباشد، هیچ سطری برنمی‌گردد. کش داده عمداً خاموش است. توضیح کامل و ساده: [راهنمای فارسی در README](README.md#راهنمای-فارسی)
+
+</div>
+
 This guide is for analysts who build datasets and charts that will be **embedded** in our
 application. Read it before you add a dataset to an embedded dashboard.
 
