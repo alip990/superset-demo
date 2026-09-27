@@ -20,10 +20,10 @@ A fully containerised demo of **Apache Superset 6.1** that shows:
 | `db` | `postgres:16` | 5440 | Superset metadata DB (`superset`) and mock business DB (`demo`) |
 | `backup-db` | `postgres:14` | 5441 | Restored beta backup (`pg_dumpall`) plus the `bi` schema in `CrimeManagementDb` |
 | `redis` | `redis:7-alpine` | n/a | Cache (the chart-data cache is deliberately off, see below) |
-| `superset-init` | `superset-demo:6.1.0-pg` | n/a | One-shot: `db upgrade`, create admin, `superset init` |
-| `superset` | `superset-demo:6.1.0-pg` | 8088 | Superset web app |
-| `superset-bootstrap` | `superset-demo:6.1.0-pg` | n/a | One-shot: runs `bootstrap.py` (sales demo) then `bootstrap_traffic.py` (traffic dashboards) |
-| `embed-app` | `superset-demo:6.1.0-pg` | 8090 | Flask host app that embeds `traffic-fa-embedded` via guest tokens |
+| `superset-init` | `superset-demo:6.1.0-jalali` | n/a | One-shot: `db upgrade`, create admin, `superset init` |
+| `superset` | `superset-demo:6.1.0-jalali` | 8088 | Superset web app |
+| `superset-bootstrap` | `superset-demo:6.1.0-jalali` | n/a | One-shot: runs `bootstrap.py` (sales demo) then `bootstrap_traffic.py` (traffic dashboards) |
+| `embed-app` | `superset-demo:6.1.0-jalali` | 8090 | Flask host app that embeds `traffic-fa-embedded` via guest tokens |
 
 > **Map tiles:** the current `docker-compose.yml` has **no `tileserver` service**. `MAP_TILE_URL` points at
 > OpenStreetMap's public raster tiles (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`). The self-hosted
@@ -111,10 +111,13 @@ cd superset-demo
 
 ### 2. Build the Superset image
 
-The stock image lacks the Postgres driver, so build the small custom image referenced by `docker-compose.yml`:
+The stock image lacks the Postgres driver and the Jalali date formatters, so build the custom image
+referenced by `docker-compose.yml` (`superset/Dockerfile`: Postgres driver + a frontend rebuilt with
+`plugins/superset-jalali`, see [JALALI_CALENDAR.md](JALALI_CALENDAR.md)). The frontend build needs ~8 GB RAM and
+takes a while the first time:
 
 ```bash
-docker build -t superset-demo:6.1.0-pg ./superset
+docker compose build superset      # -> superset-demo:6.1.0-jalali
 ```
 
 ### 3. Provide the backup dump
@@ -385,18 +388,17 @@ zero-padded `YYYY-MM-DD`, sorting it alphabetically also sorts it by date.
 - Every new table needs the same Jalali columns.
 - A text axis is categorical: days with no data simply disappear instead of showing as gaps.
 
-**Alternative (not implemented; suggested as a spike)**
-- Keep only real timestamps in the database.
-- Add Jalali month and year time grains through `TIME_GRAIN_ADDON_EXPRESSIONS` in `superset_config.py`, so grouping
-  still happens in the database.
-- Add a custom Superset frontend time formatter that uses `Intl.DateTimeFormat('fa-IR-u-ca-persian')` to label
-  the axis in Jalali.
-- The date-range picker would still be Gregorian unless the frontend is changed further.
+**Now also implemented: a Superset frontend plugin + Jalali time grains.** The function above is kept. On top of
+it, `plugins/superset-jalali` adds Jalali time formatters to Superset's frontend (a real time axis labelled
+`20 اسفند`, Jalali tooltips; switched on for all charts with the `JALALI_CALENDAR` feature flag), and
+`superset_config.py` adds **Jalali month** / **Jalali year** time grains computed in Postgres. Every option
+(including Trino, a calendar table and a Jalali date picker), how it's built and its limits:
+**[JALALI_CALENDAR.md](JALALI_CALENDAR.md)**.
 
 ### Reproduce from scratch (summary)
 
 ```bash
-docker build -t superset-demo:6.1.0-pg ./superset
+docker compose build superset
 cp /path/to/1may-backup.sql backups/1may-backup.sql
 docker compose up -d                                        # restore + 02-bi.sql + bootstrap run automatically
 docker compose logs -f superset-bootstrap                   # wait for TRAFFIC_BOOTSTRAP_DONE
@@ -519,7 +521,9 @@ tiles/iran.mbtiles ──mounted──► tileserver-gl (:8081) ──HTTP──
 
 ### Plugins
 
-**Current status: no custom plugin is implemented.** `plugins/` is an empty placeholder. All charts, including the map, are built-in Superset viz types (the map is `deck_scatter`). Anything below is a guide for adding one, not a description of existing code.
+**Current status:** one frontend plugin exists, `plugins/superset-jalali` (Jalali time formatters, not a chart
+type; see [JALALI_CALENDAR.md](JALALI_CALENDAR.md)). It is built into the image by `superset/Dockerfile`, which is
+also the template for adding a viz plugin (step 4 below). All charts, including the map, are built-in viz types.
 
 There are two things people call "plugin" here; pick the right one:
 
@@ -574,7 +578,7 @@ Notes:
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `pull access denied for superset-demo` | Custom image not built: `docker build -t superset-demo:6.1.0-pg ./superset` |
+| `pull access denied for superset-demo` | Custom image not built: `docker compose build superset` |
 | Map shows points but no base map | Tiles missing (`tiles/iran.mbtiles`), tileserver style name differs, or `localhost:8081` unreachable from the browser. Test `http://localhost:8081` |
 | Tileserver exits immediately | `iran.mbtiles` not found in `./tiles` |
 | Embedded dashboard blank / refused | CORS origin or iframe headers; check `CORS_OPTIONS` and the `embed-app` URL is exactly `http://localhost:8090` |
@@ -591,9 +595,9 @@ Notes:
 - Sample data is random; regenerated only on a fresh DB volume.
 - Chart-data caching is off for the tenant filter to be safe; every chart query hits Postgres.
 - Company ids are inserted into SQL as-is; they come from our backend in a signed token and must stay a list of integers.
-- Jalali support is a SQL workaround, not native.
+- Jalali: axis labels and tooltips come from our frontend plugin, and Jalali month/year grains need `bi.to_jalali` in the queried database. The date-range picker stays Gregorian (see [JALALI_CALENDAR.md](JALALI_CALENDAR.md)).
 - No automated tests and no CI.
-- No custom plugin exists yet (see *Plugins* above).
+- The Jalali plugin means a custom frontend build to redo on every Superset upgrade.
 
 ### Suggested first-day path
 
@@ -621,7 +625,8 @@ Notes:
 ├── embed-app/                # Flask host app (user/company pickers, guest tokens + iframe)
 ├── SUPERSET_RLS_GUIDE.md     # rules for datasets on embedded dashboards
 ├── tiles/                    # iran.mbtiles goes here (git-ignored)
-└── plugins/                  # reserved for custom viz plugins (empty today)
+├── JALALI_CALENDAR.md        # every way to do Jalali dates; what is implemented
+└── plugins/superset-jalali/  # frontend plugin: Jalali time formatters (built by superset/Dockerfile)
 ```
 
 ## Security Note
@@ -742,11 +747,12 @@ Superset تقویم شمسی ندارد. ما تاریخ را **موقع ساخ�
 - هر جدول جدید باید همین ستون‌های شمسی را داشته باشد.
 - چون محور متنی است، روزهایی که داده ندارند اصلاً نمایش داده نمی‌شوند (جای خالی نمی‌ماند).
 
-**راه دیگر (پیاده‌سازی نشده، پیشنهاد برای بررسی)**
-- در پایگاه داده فقط زمان واقعی نگه داشته شود.
-- با `TIME_GRAIN_ADDON_EXPRESSIONS` در `superset_config.py` بازهٔ ماه و سال شمسی اضافه شود تا گروه‌بندی همچنان در پایگاه داده انجام شود.
-- یک قالب‌بند زمان (time formatter) اختصاصی در ظاهر Superset با `Intl.DateTimeFormat('fa-IR-u-ca-persian')` اضافه شود تا برچسب‌ها شمسی نمایش داده شوند.
-- انتخاب‌گر بازهٔ تاریخ همچنان میلادی می‌ماند، مگر اینکه ظاهر Superset بیشتر تغییر کند.
+**راه دوم (حالا پیاده‌سازی شده، در کنار تابع بالا)**
+- یک پلاگین برای ظاهر Superset (`plugins/superset-jalali`) با تقویم فارسی خود مرورگر، برچسب محور زمان و راهنمای نمودارها را شمسی نشان می‌دهد (مثل `20 اسفند`). با پرچم `JALALI_CALENDAR` در `superset_config.py` برای همهٔ نمودارها روشن می‌شود.
+- در `superset_config.py` دو «دانهٔ زمانی» تازه اضافه شده: **Jalali month** و **Jalali year**. گروه‌بندی ماه و سال شمسی را خود پایگاه داده با تابع `bi.to_jalali` انجام می‌دهد.
+- برای این کار ظاهر Superset دوباره ساخته می‌شود (`superset/Dockerfile`).
+- انتخاب‌گر بازهٔ تاریخ هنوز میلادی است.
+- همهٔ راه‌ها (از جمله Trino، جدول تقویم و انتخاب‌گر تاریخ شمسی) در فایل [JALALI_CALENDAR.md](JALALI_CALENDAR.md) توضیح داده شده‌اند.
 
 ### چرا کش خاموش است؟
 
@@ -761,7 +767,7 @@ DATA_CACHE_CONFIG = {"CACHE_TYPE": "NullCache"}
 ### اجرا و بررسی
 
 ```bash
-docker build -t superset-demo:6.1.0-pg ./superset       # فقط بار اول
+docker compose build superset       # فقط بار اول
 docker compose up -d
 docker compose logs -f superset-bootstrap               # صبر کنید تا TRAFFIC_BOOTSTRAP_DONE چاپ شود
 ```

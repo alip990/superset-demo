@@ -151,6 +151,23 @@ def make_charts(ds, suffix, names):
             "legendOrientation": "top", "y_axis_format": "SMART_NUMBER", "rich_tooltip": True,
             "color_scheme": "supersetColors",
         }),
+        # ---- Jalali on a real time axis (plugins/superset-jalali + TIME_GRAIN_ADDONS) ----
+        # x axis is the real timestamp occurred_at, not the jalali_* text columns: the
+        # Jalali frontend formatter labels it, the JALALI_MONTH grain groups in Postgres.
+        "jalali_daily": c("روند روزانه روی محور زمان (فرمت‌کننده شمسی)", "echarts_timeseries_line", {
+            "x_axis": "occurred_at", "time_grain_sqla": "P1D", "time_range": "No filter",
+            "metrics": [CHECKS, VIOLATIONS], "groupby": [], "row_limit": 1000,
+            "x_axis_time_format": "smart_date", "tooltipTimeFormat": "smart_date",
+            "markerEnabled": True, "markerSize": 6, "show_legend": True, "legendOrientation": "top",
+            "y_axis_format": "SMART_NUMBER", "rich_tooltip": True, "color_scheme": "supersetColors",
+        }),
+        "jalali_monthly": c("تخلفات به تفکیک ماه شمسی (دانه زمانی Jalali month)", "echarts_timeseries_bar", {
+            "x_axis": "occurred_at", "time_grain_sqla": "JALALI_MONTH", "time_range": "No filter",
+            "metrics": [VIOLATIONS], "groupby": ["company"], "row_limit": 1000,
+            "x_axis_time_format": "jalali_month", "tooltipTimeFormat": "jalali_month",
+            "show_value": True, "show_legend": True, "legendOrientation": "top",
+            "y_axis_format": "SMART_NUMBER", "rich_tooltip": True, "color_scheme": "supersetColors",
+        }),
         "hourly": c("الگوی ساعتی تخلفات", "echarts_area", {
             "x_axis": "hour_of_day", "metrics": [VIOLATIONS], "groupby": ["company"], "row_limit": 1000,
             "x_axis_sort": "hour_of_day", "x_axis_sort_asc": True, "stack": "Stack", "opacity": 0.4,
@@ -263,6 +280,7 @@ def build_dashboard(ds, slug, title, suffix="", extra_fleet_row=None):
     row("ROW-o1", T + ["TAB-overview"], [("sunburst", 5, 80), ("company_bar", 4, 80), ("status", 3, 80)])
     row("ROW-o2", T + ["TAB-overview"], [("daily", 6, 70), ("hourly", 6, 70)])
     row("ROW-o3", T + ["TAB-overview"], [("day_hour", 12, 60)])
+    row("ROW-o4", T + ["TAB-overview"], [("jalali_daily", 7, 70), ("jalali_monthly", 5, 70)])
     row("ROW-m1", T + ["TAB-maps"], [("hex", 12, 110)])
     row("ROW-m2", T + ["TAB-maps"], [("heat", 6, 90), ("scatter", 6, 90)])
     row("ROW-f1", T + ["TAB-fleet"], [("roads", 6, 70), ("treemap", 6, 70)])

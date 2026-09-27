@@ -24,6 +24,10 @@ FEATURE_FLAGS = {
     "ENABLE_TEMPLATE_PROCESSING": True, # Jinja in SQL / RLS: {{ current_username() }}
     "DASHBOARD_RBAC": True,             # per-dashboard role access
     "ALERT_REPORTS": False,
+    # custom flag read by plugins/superset-jalali: Superset's default ("Adaptive")
+    # time formatting shows Jalali dates in every chart. Needs the image built from
+    # superset/Dockerfile; the stock image ignores it.
+    "JALALI_CALENDAR": True,
 }
 
 # ---- Our own map server (tileserver-gl, serving raster tiles rendered from
@@ -84,3 +88,26 @@ def get_guest_user_attribute(attribute_name, default=None):
 
 
 JINJA_CONTEXT_ADDONS = {"get_guest_user_attribute": get_guest_user_attribute}
+
+
+# ---- Jalali time grains: "Jalali month" / "Jalali year" in every chart's Time grain ----
+# Grouping has to happen in the database, so the frontend formatter alone can't do it.
+# Each bucket starts on the Gregorian timestamp of the 1st of the Jalali month/year,
+# which the Jalali formatter then shows as e.g. "اسفند" / "1404".
+# Uses bi.to_jalali() from backups/02-bi.sql, so it only works on databases that have
+# that function (our CrimeManagementDb). Other engines (Trino, ClickHouse...) need their
+# own expressions - see JALALI_CALENDAR.md.
+_JALALI = "bi.to_jalali(({col})::date)"
+_JALALI_MONTH = f"split_part({_JALALI}, '-', 2)::int"
+_JALALI_DAY = f"split_part({_JALALI}, '-', 3)::int"
+TIME_GRAIN_ADDONS = {"JALALI_MONTH": "Jalali month", "JALALI_YEAR": "Jalali year"}
+TIME_GRAIN_ADDON_EXPRESSIONS = {
+    "postgresql": {
+        # date minus (day of the Jalali month - 1)
+        "JALALI_MONTH": f"(({{col}})::date - ({_JALALI_DAY} - 1))::timestamp",
+        # date minus (day of the Jalali year - 1): months 1-6 have 31 days, 7-11 have 30
+        "JALALI_YEAR": f"(({{col}})::date - (CASE WHEN {_JALALI_MONTH} <= 6"
+                       f" THEN ({_JALALI_MONTH} - 1) * 31 ELSE 186 + ({_JALALI_MONTH} - 7) * 30 END"
+                       f" + {_JALALI_DAY} - 1))::timestamp",
+    }
+}

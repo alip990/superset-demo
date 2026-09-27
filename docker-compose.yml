@@ -1,7 +1,9 @@
 name: superset-demo
 
 x-superset: &superset
-  image: superset-demo:6.1.0-pg
+  # superset/Dockerfile: 6.1.0 + psycopg2 + Jalali date formatters (plugins/superset-jalali)
+  image: superset-demo:6.1.0-jalali
+  build: {context: ., dockerfile: superset/Dockerfile}
   environment:
     SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
     # No local tile server / iran.mbtiles available (ghcr.io was unreachable for
@@ -70,7 +72,7 @@ services:
 
   # host application that embeds a dashboard in an iframe using guest tokens
   embed-app:
-    image: superset-demo:6.1.0-pg
+    image: superset-demo:6.1.0-jalali  # only its Python (Flask, requests, psycopg2) is used
     command: python /srv/app.py
     working_dir: /srv
     volumes: ["./embed-app:/srv:ro"]
