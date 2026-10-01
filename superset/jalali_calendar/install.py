@@ -74,13 +74,29 @@ DEFAULT_OPTIONS: dict[str, Any] = {
 
 
 def options(app: Any = None) -> dict[str, Any]:
-    """Defaults merged with the JALALI_CALENDAR_OPTIONS dict from the config."""
+    """Defaults merged with the JALALI_CALENDAR_OPTIONS dict from the config.
+
+    Only keys this module knows are taken, which catches a typo in the config and
+    keeps install() idempotent: _expose_options() replaces the same config key
+    with the camelCase payload the browser reads, so a second install() in the
+    same process must not mistake that payload for configuration."""
     merged = dict(DEFAULT_OPTIONS)
-    config = {}
-    if app is not None:
-        config = app.config.get(OPTIONS_KEY) or {}
-    merged.update(config)
+    config = (app.config.get(OPTIONS_KEY) or {}) if app is not None else {}
+    unknown = [key for key in config if key not in DEFAULT_OPTIONS]
+    known = {key: value for key, value in config.items() if key in DEFAULT_OPTIONS}
+    if unknown and not all(key in _PUBLISHED_KEYS for key in unknown):
+        logger.warning("jalali: ignoring unknown %s keys: %s", OPTIONS_KEY,
+                       ", ".join(sorted(set(unknown) - _PUBLISHED_KEYS)))
+    merged.update(known)
     return merged
+
+
+# the camelCase keys the browser gets; recognised here only so that a second
+# install() in the same process does not warn about its own payload
+_PUBLISHED_KEYS = frozenset({
+    "enabled", "digits", "overrideSmartDate", "shiftMinutes", "thursdayIsWeekend",
+    "monthNames", "weekdayNames", "seasonNames", "formats", "ranges",
+})
 
 
 def _published_options(opts: dict[str, Any]) -> dict[str, Any]:
