@@ -1,0 +1,4 @@
+# docker build context is the repo root only for superset/Dockerfile: keep it small
+*
+!superset/Dockerfile
+!plugins/superset-jalali/

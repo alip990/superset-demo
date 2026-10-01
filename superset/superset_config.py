@@ -26,6 +26,10 @@ FEATURE_FLAGS = {
     "ENABLE_TEMPLATE_PROCESSING": True, # Jinja in SQL / RLS: {{ current_username() }}
     "DASHBOARD_RBAC": True,             # per-dashboard role access
     "ALERT_REPORTS": False,
+    # custom flag read by plugins/superset-jalali: Superset's default ("Adaptive")
+    # time formatting shows Jalali dates in every chart. Needs the image built from
+    # superset/Dockerfile; the stock image ignores it.
+    "JALALI_CALENDAR": True,
 }
 
 # ---- Our own map server (tileserver-gl, serving raster tiles rendered from
