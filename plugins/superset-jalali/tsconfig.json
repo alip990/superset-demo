@@ -1,0 +1,25 @@
+{
+  "comment": "Offline type-check of the plugin (npm run typecheck). The Superset modules are declared in types/superset.d.ts; the real build type-checks against the real ones inside superset-frontend.",
+  "compilerOptions": {
+    "target": "ES2019",
+    "lib": ["ES2019", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "types": ["node", "react"],
+    "baseUrl": ".",
+    "paths": {
+      "src/jalali": ["src/index.ts"],
+      "src/jalali/*": ["src/*"]
+    }
+  },
+  "include": ["src/**/*", "types/**/*"]
+}

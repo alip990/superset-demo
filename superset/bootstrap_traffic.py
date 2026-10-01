@@ -153,9 +153,10 @@ def make_charts(ds, suffix, names):
             "legendOrientation": "top", "y_axis_format": "SMART_NUMBER", "rich_tooltip": True,
             "color_scheme": "supersetColors",
         }),
-        # ---- Jalali on a real time axis (plugins/superset-jalali + TIME_GRAIN_ADDONS) ----
+        # ---- Jalali on a real time axis (superset/jalali_calendar + plugins/superset-jalali) ----
         # x axis is the real timestamp occurred_at, not the jalali_* text columns: the
-        # Jalali frontend formatter labels it, the JALALI_MONTH grain groups in Postgres.
+        # JALALI_* grains bucket it in the database and the Jalali time formats label it.
+        # See JALALI_CALENDAR.md.
         "jalali_daily": c("روند روزانه روی محور زمان (فرمت‌کننده شمسی)", "echarts_timeseries_line", {
             "x_axis": "occurred_at", "time_grain_sqla": "P1D", "time_range": "No filter",
             "metrics": [CHECKS, VIOLATIONS], "groupby": [], "row_limit": 1000,
@@ -168,6 +169,22 @@ def make_charts(ds, suffix, names):
             "metrics": [VIOLATIONS], "groupby": ["company"], "row_limit": 1000,
             "x_axis_time_format": "jalali_month", "tooltipTimeFormat": "jalali_month",
             "show_value": True, "show_legend": True, "legendOrientation": "top",
+            "y_axis_format": "SMART_NUMBER", "rich_tooltip": True, "color_scheme": "supersetColors",
+        }),
+        "jalali_quarter": c("تخلفات به تفکیک فصل شمسی (دانه زمانی Jalali quarter)",
+                            "echarts_timeseries_bar", {
+            "x_axis": "occurred_at", "time_grain_sqla": "JALALI_QUARTER", "time_range": "No filter",
+            "metrics": [CHECKS, VIOLATIONS], "groupby": [], "row_limit": 1000,
+            "x_axis_time_format": "jalali_quarter", "tooltipTimeFormat": "jalali_quarter",
+            "show_value": True, "show_legend": True, "legendOrientation": "top",
+            "y_axis_format": "SMART_NUMBER", "rich_tooltip": True, "color_scheme": "supersetColors",
+        }),
+        # the Iranian week starts on Saturday, which no built-in grain does
+        "jalali_week": c("روند هفتگی (هفته شمسی: شنبه تا جمعه)", "echarts_timeseries_line", {
+            "x_axis": "occurred_at", "time_grain_sqla": "JALALI_WEEK", "time_range": "No filter",
+            "metrics": [CHECKS], "groupby": ["company"], "row_limit": 1000,
+            "x_axis_time_format": "jalali_date", "tooltipTimeFormat": "jalali_verbose",
+            "markerEnabled": True, "markerSize": 6, "show_legend": True, "legendOrientation": "top",
             "y_axis_format": "SMART_NUMBER", "rich_tooltip": True, "color_scheme": "supersetColors",
         }),
         "hourly": c("الگوی ساعتی تخلفات", "echarts_area", {
@@ -283,6 +300,7 @@ def build_dashboard(ds, slug, title, suffix="", extra_fleet_row=None):
     row("ROW-o2", T + ["TAB-overview"], [("daily", 6, 70), ("hourly", 6, 70)])
     row("ROW-o3", T + ["TAB-overview"], [("day_hour", 12, 60)])
     row("ROW-o4", T + ["TAB-overview"], [("jalali_daily", 7, 70), ("jalali_monthly", 5, 70)])
+    row("ROW-o5", T + ["TAB-overview"], [("jalali_quarter", 6, 70), ("jalali_week", 6, 70)])
     row("ROW-m1", T + ["TAB-maps"], [("hex", 12, 110)])
     row("ROW-m2", T + ["TAB-maps"], [("heat", 6, 90), ("scatter", 6, 90)])
     row("ROW-f1", T + ["TAB-fleet"], [("roads", 6, 70), ("treemap", 6, 70)])
@@ -301,7 +319,29 @@ def build_dashboard(ds, slug, title, suffix="", extra_fleet_row=None):
                 "cascadeParentIds": [], "scope": {"rootPath": ["ROOT_ID"], "excluded": []},
                 "chartsInScope": [cid for k, cid in charts.items() if k not in (extra_fleet_row or {})], "tabsInScope": list(tabs), "description": ""}
 
-    filters = [select_filter("NATIVE_FILTER-company", "پلیس استان", "company"),
+    # Charts whose x axis is the real timestamp: only those can honour a time range.
+    # The rest group by the jalali_date/jalali_month *text* columns (see README).
+    TIME_AXIS_CHARTS = ["jalali_daily", "jalali_monthly", "jalali_quarter", "jalali_week"]
+
+    def time_filter(fid, name, default):
+        """Native time-range filter. It renders the same DateFilterControl a chart
+        uses, so it offers the Jalali shortcuts ("ماه جاری (شمسی)", "از ابتدای سال تا
+        امروز") and the Jalali calendar, and stores whatever the server can resolve
+        (superset/jalali_calendar/ranges.py). The default below is a Jalali literal
+        range covering the demo data, which only has a few days of 1403-12 and 1404-01."""
+        scoped = [charts[key] for key in TIME_AXIS_CHARTS if key in charts]
+        return {"id": fid, "name": name, "filterType": "filter_time", "type": "NATIVE_FILTER",
+                "targets": [{}], "controlValues": {},
+                "defaultDataMask": {"extraFormData": {"time_range": default},
+                                    "filterState": {"value": default}, "ownState": {}},
+                "cascadeParentIds": [],
+                "scope": {"rootPath": ["ROOT_ID"],
+                          "excluded": [cid for cid in charts.values() if cid not in scoped]},
+                "chartsInScope": scoped, "tabsInScope": list(tabs), "description": ""}
+
+    filters = [time_filter("NATIVE_FILTER-jalali-range", "بازه زمانی (شمسی)",
+                           "jalali:1403-12-01 : jalali:1404-02-01"),
+               select_filter("NATIVE_FILTER-company", "پلیس استان", "company"),
                select_filter("NATIVE_FILTER-date", "تاریخ (شمسی)", "jalali_date"),
                select_filter("NATIVE_FILTER-status", "وضعیت", "status"),
                select_filter("NATIVE_FILTER-road", "محور", "location"),

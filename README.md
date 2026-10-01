@@ -20,10 +20,16 @@ A fully containerised demo of **Apache Superset 6.1** that shows:
 | `db` | `postgres:16` | 5440 | Superset metadata DB (`superset`) and mock business DB (`demo`) |
 | `backup-db` | `postgres:14` | 5441 | Restored beta backup (`pg_dumpall`) plus the `bi` schema in `CrimeManagementDb` |
 | `redis` | `redis:7-alpine` | n/a | Cache (the chart-data cache is deliberately off, see below) |
-| `superset-init` | `superset-demo:6.1.0-jalali` | n/a | One-shot: `db upgrade`, create admin, `superset init` |
-| `superset` | `superset-demo:6.1.0-jalali` | 8088 | Superset web app |
-| `superset-bootstrap` | `superset-demo:6.1.0-jalali` | n/a | One-shot: runs `bootstrap.py` (sales demo) then `bootstrap_traffic.py` (traffic dashboards) |
-| `embed-app` | `superset-demo:6.1.0-jalali` | 8090 | Flask host app that embeds `traffic-fa-embedded` via guest tokens |
+| `superset-init` | `superset-demo:6.1.0-pg` | n/a | One-shot: `db upgrade`, create admin, `superset init` |
+| `superset` | `superset-demo:6.1.0-pg` | 8088 | Superset web app |
+| `superset-bootstrap` | `superset-demo:6.1.0-pg` | n/a | One-shot: runs `bootstrap.py` (sales demo) then `bootstrap_traffic.py` (traffic dashboards) |
+| `embed-app` | `superset-demo:6.1.0-pg` | 8090 | Flask host app that embeds `traffic-fa-embedded` via guest tokens |
+| `superset-frontend-build` | `superset-demo:6.1.0-jalali` | n/a | Build-only (`--profile build`): the same image with the Jalali frontend, see [JALALI_CALENDAR.md](JALALI_CALENDAR.md) |
+
+> **Image switch:** the four Superset services use `${SUPERSET_IMAGE:-superset-demo:6.1.0-pg}`. The Jalali
+> *backend* (time grains, the Jalali date-picker vocabulary, dataset macros) is pure configuration and runs on
+> the default image. Only the browser half (Jalali axis labels, tooltips, the month-grid picker) needs the
+> rebuilt frontend: build `superset-frontend-build` and set `SUPERSET_IMAGE=superset-demo:6.1.0-jalali`.
 
 > **Map tiles:** the current `docker-compose.yml` has **no `tileserver` service**. `MAP_TILE_URL` points at
 > OpenStreetMap's public raster tiles (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`). The self-hosted
@@ -111,13 +117,25 @@ cd superset-demo
 
 ### 2. Build the Superset image
 
-The stock image lacks the Postgres driver and the Jalali date formatters, so build the custom image
-referenced by `docker-compose.yml` (`superset/Dockerfile`: Postgres driver + a frontend rebuilt with
-`plugins/superset-jalali`, see [JALALI_CALENDAR.md](JALALI_CALENDAR.md)). The frontend build needs ~8 GB RAM and
-takes a while the first time:
+The stock image lacks the Postgres driver, so build `superset-demo:6.1.0-pg` (this is the image
+`docker-compose.yml` uses by default):
 
 ```bash
-docker compose build superset      # -> superset-demo:6.1.0-jalali
+docker build -t superset-demo:6.1.0-pg - <<'EOF'
+FROM apache/superset:6.1.0
+USER root
+RUN uv pip install --python /app/.venv/bin/python --no-cache psycopg2-binary==2.9.13
+USER superset
+EOF
+```
+
+Optional, for Jalali axis labels, tooltips and the Jalali date picker in the browser: build the frontend image
+too (`superset/Dockerfile` rebuilds Superset's frontend with `plugins/superset-jalali`; ~8 GB RAM and 20-40
+minutes the first time, see [JALALI_CALENDAR.md](JALALI_CALENDAR.md)):
+
+```bash
+docker compose --profile build build superset-frontend-build   # -> superset-demo:6.1.0-jalali
+export SUPERSET_IMAGE=superset-demo:6.1.0-jalali               # used by every Superset service
 ```
 
 ### 3. Provide the backup dump
@@ -327,10 +345,11 @@ that went into the token.
 Then log in to http://localhost:8088 as `traffic_qom` / `traffic_qom` and open `traffic-fa`: it shows the same
 Qom numbers through the regular RLS rule. `traffic_national` sees both provinces.
 
-### Jalali (Persian) dates: one possible approach
+### Jalali (Persian) dates: the first approach, and what replaced it
 
-Superset has no Jalali calendar, so this demo converts dates **in SQL, at load time** and gives Superset ready-made
-Jalali text columns. This is one possible approach, not the only one (see the alternative below).
+Superset has no Jalali calendar. The first dashboards solved that by converting dates **in SQL, at load time** and
+giving Superset ready-made Jalali text columns. That is described below because the existing charts still use it;
+the full calendar support that came later is in **[JALALI_CALENDAR.md](JALALI_CALENDAR.md)**.
 
 **The function.** `bi.to_jalali(date)` in `backups/02-bi.sql` is a plain plpgsql arithmetic conversion. It needs no
 extension and no Superset plugin. Example: `bi.to_jalali('2025-03-10')` → `'1403-12-20'`.
@@ -393,17 +412,28 @@ zero-padded `YYYY-MM-DD`, sorting it alphabetically also sorts it by date.
 - Every new table needs the same Jalali columns.
 - A text axis is categorical: days with no data simply disappear instead of showing as gaps.
 
-**Now also implemented: a Superset frontend plugin + Jalali time grains.** The function above is kept. On top of
-it, `plugins/superset-jalali` adds Jalali time formatters to Superset's frontend (a real time axis labelled
-`20 اسفند`, Jalali tooltips; switched on for all charts with the `JALALI_CALENDAR` feature flag), and
-`superset_config.py` adds **Jalali month** / **Jalali year** time grains computed in Postgres. Every option
-(including Trino, a calendar table and a Jalali date picker), how it's built and its limits:
+**What replaced it.** All three cons are now solved, without touching those columns:
+
+| | How |
+|---|---|
+| Group by a Jalali period | five **time grains** ("ماه شمسی", "فصل شمسی", "هفته شمسی (شنبه)", "نیم‌سال شمسی", "سال شمسی") on the real timestamp column, as inline SQL for 21 engines - nothing installed in the database |
+| Filter by Jalali dates | a **Jalali date picker** plus a time-range vocabulary ("ماه جاری (شمسی)", "از ابتدای سال تا امروز", `jalali:1403-12`) that the **server** resolves, so saved charts, alerts, reports and embedded dashboards agree with the browser |
+| Jalali axis and tooltips | Jalali **time formats** in every chart, optionally as Superset's default, so existing charts turn Persian without being edited |
+| Weekends, holidays, working days | `jalali.dim_date` from `db/jalali.sql` |
+
+One calendar algorithm shared by Python, TypeScript and SQL, checked against the browser's own Persian calendar
+for every day between 1900 and 2200. How it is built, every configuration option and its limits:
 **[JALALI_CALENDAR.md](JALALI_CALENDAR.md)**.
 
 ### Reproduce from scratch (summary)
 
 ```bash
-docker compose build superset
+docker build -t superset-demo:6.1.0-pg - <<'EOF'
+FROM apache/superset:6.1.0
+USER root
+RUN uv pip install --python /app/.venv/bin/python --no-cache psycopg2-binary==2.9.13
+USER superset
+EOF
 cp /path/to/1may-backup.sql backups/1may-backup.sql
 docker compose up -d                                        # restore + 02-bi.sql + bootstrap run automatically
 docker compose logs -f superset-bootstrap                   # wait for TRAFFIC_BOOTSTRAP_DONE
@@ -412,8 +442,16 @@ docker compose logs -f superset-bootstrap                   # wait for TRAFFIC_B
 docker compose exec -T backup-db psql -U postgres -q < backups/02-bi.sql
 # after editing superset/bootstrap_traffic.py:
 docker compose run --rm superset-bootstrap
-# after editing superset/superset_config.py or embed-app/app.py:
+# after editing superset/superset_config.py, superset/jalali_calendar/ or embed-app/app.py:
 docker compose restart superset embed-app
+# after editing db/jalali.sql:
+docker compose exec -T db psql -U postgres -d demo < db/jalali.sql
+
+# the Jalali browser half (optional, ~8 GB RAM):
+docker compose --profile build build superset-frontend-build
+SUPERSET_IMAGE=superset-demo:6.1.0-jalali docker compose up -d
+
+tests/run.sh                                                # calendar, grains, ranges, plugin
 ```
 
 ## Developer Guide (Onboarding)
@@ -444,8 +482,11 @@ Three ideas to hold on to:
 | Concern | File | What to look at |
 |---|---|---|
 | Postgres DBs, sample data | `db/01-init.sql` | Creates `superset` (metadata) and `demo` (business) DBs; `provinces` → `branches` → `sales` (random data, ~540 days) and `user_access` |
-| Jalali calendar | `db/01-init.sql` | `to_jalali(date)` SQL function fills `jalali_date/month/year` columns; charts group on `jalali_month` |
-| Superset image | `superset/Dockerfile` | Stock `apache/superset:6.1.0` + `psycopg2-binary` |
+| Jalali calendar (backend) | `superset/jalali_calendar/` | Time grains for 21 engines, the Jalali time-range vocabulary the date picker stores, dataset macros - all from `FLASK_APP_MUTATOR`, no custom image |
+| Jalali calendar (browser) | `plugins/superset-jalali/` | Time formats, the Jalali shortcuts of the date picker and the month-grid picker itself; built into the image by `superset/Dockerfile` |
+| Jalali calendar (SQL) | `db/jalali.sql` | `jalali.*` functions and `jalali.dim_date` with Iranian weekends and holidays (optional) |
+| Jalali text columns (legacy) | `db/01-init.sql`, `backups/02-bi.sql` | `to_jalali(date)` fills `jalali_date/month/year`; the first dashboards group on them as text |
+| Superset image | `superset/Dockerfile` | `apache/superset:6.1.0` + `psycopg2-binary` + the rebuilt frontend with the Jalali plugin |
 | Superset settings | `superset/superset_config.py` | Persian locale, feature flags, embedding/CORS, guest-token settings, deck.gl base map |
 | Provisioning | `superset/bootstrap.py` | REST API calls (connection, datasets, charts, dashboard layout, embedding) then ORM code for roles/users/RLS |
 | Host app | `embed-app/app.py`, `embed-app/index.html` | Fake users, company-tree CTE, guest-token endpoint, iframe via `@superset-ui/embedded-sdk` |
@@ -456,7 +497,13 @@ Three ideas to hold on to:
 #### Persian + Jalali
 
 - UI language: `BABEL_DEFAULT_LOCALE = "fa"` (English kept in `LANGUAGES`).
-- Superset has no native Jalali axis, so dates are pre-computed in SQL and used as plain text dimensions (`x_axis: "jalali_month"`). Trade-off: sorting works because `YYYY-MM` sorts lexically; there is no real date arithmetic.
+- The first dashboards pre-computed Jalali dates in SQL and used them as plain text dimensions
+  (`x_axis: "jalali_month"`): sorting works because `YYYY-MM` sorts lexically, but there is no date arithmetic.
+  Those charts still work and are left as they are.
+- Everything built after them uses the real thing: Jalali **time grains** on the actual timestamp column, the
+  Jalali **date picker** and **time-range vocabulary**, and Jalali **time formats** in the browser. One
+  algorithm, shared by Python, TypeScript and SQL, tested against the browser's own Persian calendar for every
+  day of 1900-2200 - see [JALALI_CALENDAR.md](JALALI_CALENDAR.md).
 
 #### Bootstrap flow (`superset/bootstrap.py`)
 
@@ -583,7 +630,7 @@ Notes:
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `pull access denied for superset-demo` | Custom image not built: `docker compose build superset` |
+| `pull access denied for superset-demo` | Custom image not built: see *Build the Superset image*. For the Jalali frontend: `docker compose --profile build build superset-frontend-build` |
 | Map shows points but no base map | Tiles missing (`tiles/iran.mbtiles`), tileserver style name differs, or `localhost:8081` unreachable from the browser. Test `http://localhost:8081` |
 | Tileserver exits immediately | `iran.mbtiles` not found in `./tiles` |
 | Embedded dashboard blank / refused | CORS origin or iframe headers; check `CORS_OPTIONS` and the `embed-app` URL is exactly `http://localhost:8090` |
@@ -600,9 +647,14 @@ Notes:
 - Sample data is random; regenerated only on a fresh DB volume.
 - Chart-data caching is off for the tenant filter to be safe; every chart query hits Postgres.
 - Company ids are inserted into SQL as-is; they come from our backend in a signed token and must stay a list of integers.
-- Jalali: axis labels and tooltips come from our frontend plugin, and Jalali month/year grains need `bi.to_jalali` in the queried database. The date-range picker stays Gregorian (see [JALALI_CALENDAR.md](JALALI_CALENDAR.md)).
-- No automated tests and no CI.
-- The Jalali plugin means a custom frontend build to redo on every Superset upgrade.
+- Jalali: axis *tick positions* are still chosen by ECharts on Gregorian boundaries (each tick is labelled with
+  its correct Jalali date); lunar holidays have to be loaded into `jalali.holiday_override` because no formula can
+  compute them; dates outside 1178-1633 AP are refused rather than guessed. See
+  [JALALI_CALENDAR.md](JALALI_CALENDAR.md) for the full list.
+- The Jalali *browser* half means a custom frontend build to redo on every Superset upgrade (three small patches
+  that fail the build loudly if upstream moves). The backend half is plain configuration.
+- Tests cover the Jalali calendar, grains, ranges and SQL library (`tests/run.sh`); the rest of the demo -
+  bootstrap, embedding, RLS - has no automated tests, and there is no CI.
 
 ### Suggested first-day path
 
@@ -617,22 +669,27 @@ Notes:
 ```
 .
 ├── docker-compose.yml        # all services
-├── db/01-init.sql            # creates DBs, Jalali function, mock sales data, user_access
+├── db/
+│   ├── 01-init.sql           # creates DBs, legacy to_jalali(), mock sales data, user_access
+│   ├── jalali.sql            # jalali schema: calendar functions, dim_date, Iranian holidays
+│   └── 02-init-jalali.sql    # installs the above into the demo DB on first start
 ├── backups/
 │   ├── 1may-backup.sql       # beta pg_dumpall (git-ignored, supply it yourself)
 │   ├── restore.sh            # first-start restore into backup-db
 │   └── 02-bi.sql             # schema bi: company tree, users, vehicles, violation fact table
 ├── superset/
 │   ├── Dockerfile            # Superset 6.1.0 + psycopg2
-│   ├── superset_config.py    # fa locale, feature flags, embedding, base map, installs the backport below
+│   ├── superset_config.py    # fa locale, feature flags, embedding, base map, Jalali options, installs both below
 │   ├── guest_user_attributes.py  # backports guest-token user.attributes + the macro onto 6.1.0
+│   ├── jalali_calendar/      # Jalali time grains, time-range vocabulary, dataset macros (backend half)
 │   ├── bootstrap.py          # provisions the sales charts, dashboard, roles, users, RLS
 │   └── bootstrap_traffic.py  # traffic-fa and traffic-fa-embedded dashboards, RLS, EmbedGuest grants
 ├── embed-app/                # Flask host app (user/company pickers, guest tokens + iframe)
+├── tests/                    # calendar, grains, ranges and SQL library: tests/run.sh
 ├── SUPERSET_RLS_GUIDE.md     # rules for datasets on embedded dashboards
 ├── tiles/                    # iran.mbtiles goes here (git-ignored)
-├── JALALI_CALENDAR.md        # every way to do Jalali dates; what is implemented
-└── plugins/superset-jalali/  # frontend plugin: Jalali time formatters (built by superset/Dockerfile)
+├── JALALI_CALENDAR.md        # the Jalali calendar: what is implemented, how and why
+└── plugins/superset-jalali/  # browser half of the Jalali calendar (built by superset/Dockerfile)
 ```
 
 ## Security Note

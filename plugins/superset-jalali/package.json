@@ -1,0 +1,19 @@
+{
+  "name": "superset-jalali",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Jalali (Persian) calendar for the Superset frontend: time formatters, Jalali time-range shortcuts and a Jalali date picker.",
+  "license": "Apache-2.0",
+  "comment": "Not installed into superset-frontend: superset/Dockerfile copies src/ into superset-frontend/src/jalali/ and the patches hook it in, so Superset's own package-lock.json stays untouched and `npm ci` keeps working. These devDependencies only exist to type-check and test this directory on its own.",
+  "scripts": {
+    "test": "tsc -p tsconfig.test.json && node dist-test/tests/jalali.test.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/react": "^18.3.31",
+    "dayjs": "^1.11.10",
+    "typescript": "^5.4.5"
+  }
+}

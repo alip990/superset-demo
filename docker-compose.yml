@@ -1,9 +1,15 @@
 name: superset-demo
 
 x-superset: &superset
-  # superset/Dockerfile: 6.1.0 + psycopg2 + Jalali date formatters (plugins/superset-jalali)
-  image: superset-demo:6.1.0-jalali
-  build: {context: ., dockerfile: superset/Dockerfile}
+  # Stock-frontend image (6.1.0 + psycopg2). Everything on the backend - the Jalali
+  # time grains, the Jalali time-range vocabulary of the date picker and the dataset
+  # macros - works on this image, because it is all configuration.
+  # The browser half (Jalali axis labels, tooltips and the month-grid picker) needs
+  # the rebuilt frontend from superset/Dockerfile:
+  #   docker compose --profile build build superset-frontend-build
+  #   SUPERSET_IMAGE=superset-demo:6.1.0-jalali docker compose up -d
+  # See JALALI_CALENDAR.md; the build needs ~8 GB RAM and 20-40 minutes.
+  image: ${SUPERSET_IMAGE:-superset-demo:6.1.0-pg}
   environment:
     SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
     # No local tile server / iran.mbtiles available (ghcr.io was unreachable for
@@ -13,6 +19,8 @@ x-superset: &superset
     - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
     # backports guest-token user.attributes onto 6.1.0; imported by FLASK_APP_MUTATOR
     - ./superset/guest_user_attributes.py:/app/pythonpath/guest_user_attributes.py:ro
+    # Jalali time grains, time-range vocabulary and dataset macros; same hook
+    - ./superset/jalali_calendar:/app/pythonpath/jalali_calendar:ro
     - ./superset/bootstrap.py:/app/bootstrap.py:ro
   depends_on:
     db: {condition: service_healthy}
@@ -24,6 +32,10 @@ services:
     environment: {POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres}
     volumes:
       - ./db/01-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      # Jalali calendar functions + jalali.dim_date in the demo database; the
+      # library is kept out of initdb.d so it is only run against "demo"
+      - ./db/02-init-jalali.sql:/docker-entrypoint-initdb.d/02-init-jalali.sql:ro
+      - ./db/jalali.sql:/opt/jalali/jalali.sql:ro
       - pgdata:/var/lib/postgresql/data
     ports: ["127.0.0.1:5440:5432"]
     healthcheck: {test: ["CMD", "pg_isready", "-U", "postgres"], interval: 5s, retries: 20}
@@ -67,15 +79,23 @@ services:
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
       - ./superset/guest_user_attributes.py:/app/pythonpath/guest_user_attributes.py:ro
+      - ./superset/jalali_calendar:/app/pythonpath/jalali_calendar:ro
       - ./superset/bootstrap.py:/app/bootstrap.py:ro
       - ./superset/bootstrap_traffic.py:/app/bootstrap_traffic.py:ro
     depends_on:
       superset: {condition: service_healthy}
       backup-db: {condition: service_healthy}
 
+  # builds the image with the Jalali frontend; never started, only built
+  superset-frontend-build:
+    profiles: ["build"]
+    image: superset-demo:6.1.0-jalali
+    build: {context: ., dockerfile: superset/Dockerfile}
+    command: ["true"]
+
   # host application that embeds a dashboard in an iframe using guest tokens
   embed-app:
-    image: superset-demo:6.1.0-jalali  # only its Python (Flask, requests, psycopg2) is used
+    image: ${SUPERSET_IMAGE:-superset-demo:6.1.0-pg}  # only its Python (Flask, requests, psycopg2) is used
     command: python /srv/app.py
     working_dir: /srv
     volumes: ["./embed-app:/srv:ro"]

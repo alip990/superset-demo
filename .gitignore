@@ -8,3 +8,7 @@ tiles/*.osm.pbf
 *.log
 .env
 __pycache__/
+# plugin type-check / test toolchain (see plugins/superset-jalali/README.md)
+plugins/superset-jalali/node_modules/
+plugins/superset-jalali/dist-test/
+plugins/superset-jalali/package-lock.json

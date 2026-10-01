@@ -131,6 +131,13 @@ If you port this to another Superset version, check that patch still applies. It
 start-up rather than booting half-patched, because a silently unregistered macro is a
 cross-tenant data leak, not a performance regression.
 
+The Jalali dataset macros (`superset/jalali_calendar/jinja.py`) are registered the same way,
+for the same reason in a milder form: `{{ jalali_filter('occurred_at', 'Current jalali
+month') }}` resolves to a different date range every month, so without the cache key a chart
+would keep serving last month's rows after midnight on the 1st. The three macros whose value
+depends only on their arguments (`to_jalali`, `from_jalali`, `jalali_grain`) deliberately
+register nothing. See [JALALI_CALENDAR.md](JALALI_CALENDAR.md).
+
 ## Known limitations
 
 - The ids are not validated beyond `where_in`'s dialect quoting. They come from our own

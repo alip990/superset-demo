@@ -26,9 +26,8 @@ FEATURE_FLAGS = {
     "ENABLE_TEMPLATE_PROCESSING": True, # Jinja in SQL / RLS: {{ current_username() }}
     "DASHBOARD_RBAC": True,             # per-dashboard role access
     "ALERT_REPORTS": False,
-    # custom flag read by plugins/superset-jalali: Superset's default ("Adaptive")
-    # time formatting shows Jalali dates in every chart. Needs the image built from
-    # superset/Dockerfile; the stock image ignores it.
+    # read by plugins/superset-jalali when JALALI_CALENDAR_OPTIONS is absent;
+    # see the Jalali section below. Only the frontend bundle looks at it.
     "JALALI_CALENDAR": True,
 }
 
@@ -66,6 +65,44 @@ WTF_CSRF_ENABLED = True
 FAB_ADD_SECURITY_API = True  # /api/v1/security/roles, users ... for automation
 
 
+# ---- Jalali (Persian) calendar (see JALALI_CALENDAR.md) ----
+# superset/jalali_calendar/ adds, from this one hook:
+#   * the time grains "ماه شمسی", "فصل شمسی", "هفته شمسی (شنبه)", "نیم‌سال شمسی"
+#     and "سال شمسی" to every chart, as inline SQL for 21 engines - nothing has to
+#     be installed in the database;
+#   * the Jalali time-range vocabulary the date picker stores and the server
+#     resolves ("ماه جاری (شمسی)", "از ابتدای سال تا امروز", "jalali:1403-12"),
+#     which is what makes saved charts, alerts, reports and embedded dashboards
+#     agree with the browser;
+#   * dataset macros: {{ jalali_filter('occurred_at', 'Current jalali month') }},
+#     {{ jalali_today() }}, {{ from_jalali('1403-12-20') }} ...
+#   * these options in the bootstrap payload, for plugins/superset-jalali.
+# Every key is optional; the defaults are in jalali_calendar/install.py.
+JALALI_CALENDAR_OPTIONS = {
+    "enabled": True,
+    # "persian" shows ۱۴۰۳-۱۲-۲۰ everywhere instead of 1403-12-20
+    "digits": "latin",
+    # replace Superset's own "Adaptive formatting", so charts that never chose a
+    # time format become Jalali without being edited
+    "override_smart_date": True,
+    # minutes added to a timestamp before deciding which Jalali day it is. 0 here:
+    # bi.violation.occurred_at is already Tehran local time. Use 210 for data
+    # stored in UTC (Asia/Tehran is UTC+3:30), or the day would break at 03:30.
+    "shift_minutes": 0,
+    # accept "1403-12-20" in the Advanced frame without the "jalali:" prefix; no
+    # real data is from the 15th century, so this cannot swallow a Gregorian date
+    "bare_literals": True,
+    # "inline" = self-contained arithmetic (default, works everywhere);
+    # "function" = the shorter, indexable jalali.*_start() functions from
+    # db/jalali.sql, which the db container installs into the demo database
+    "grain_mode": "inline",
+}
+# Makes every *new* chart open on the current Jalali month. Left off because the
+# demo data only covers a few days of 1403-12 and 1404-01, so new charts would
+# look empty:
+# DEFAULT_TIME_FILTER = "Current jalali month"
+
+
 # ---- Guest-token user attributes (see SUPERSET_RLS_GUIDE.md) ----
 # apache/superset master lets a guest token carry `user.attributes` and reads them
 # back in SQL templates via get_guest_user_attribute(); 6.1.0 ships neither, so
@@ -73,6 +110,8 @@ FAB_ADD_SECURITY_API = True  # /api/v1/security/roles, users ... for automation
 # real attribute - {"attributes": {"allowed_companies": [3, 4]}} - instead of being
 # packed into the username, and it reaches the query cache key.
 def FLASK_APP_MUTATOR(app):  # noqa: N802
+    import jalali_calendar
     from guest_user_attributes import install
 
     install()
+    jalali_calendar.install(app)
