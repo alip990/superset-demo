@@ -417,7 +417,7 @@ zero-padded `YYYY-MM-DD`, sorting it alphabetically also sorts it by date.
 | | How |
 |---|---|
 | Group by a Jalali period | five **time grains** ("ماه شمسی", "فصل شمسی", "هفته شمسی (شنبه)", "نیم‌سال شمسی", "سال شمسی") on the real timestamp column, as inline SQL for 21 engines - nothing installed in the database |
-| Filter by Jalali dates | a **Jalali date picker** plus a time-range vocabulary ("ماه جاری (شمسی)", "از ابتدای سال تا امروز", `jalali:1403-12`) that the **server** resolves, so saved charts, alerts, reports and embedded dashboards agree with the browser |
+| Filter by Jalali dates | a **Jalali date picker** plus a time-range vocabulary ("ماه جاری (شمسی)", "از ابتدای سال تا امروز", `jalali:1403-12`) that the **server** converts to a Gregorian range on the real timestamp column, so saved charts, alerts, reports and embedded dashboards agree with the browser. Every chart carries a *Time column* (`granularity_sqla`), which is what lets one dashboard filter reach the text-axis charts too |
 | Jalali axis and tooltips | Jalali **time formats** in every chart, optionally as Superset's default, so existing charts turn Persian without being edited |
 | Weekends, holidays, working days | `jalali.dim_date` from `db/jalali.sql` |
 

@@ -48,6 +48,14 @@ db_id = find("database", "database_name", DB_NAME) or api("POST", "database/", j
 
 
 
+# The real timestamp column of every violation dataset. Superset applies a time
+# range only to a query that has a temporal column, so every chart gets this one
+# (see make_charts) and the dashboard's Jalali date filter therefore reaches all
+# of them - including the charts that group by the jalali_date *text* column.
+# JALALI_CALENDAR.md, "Making the filter reach every chart".
+TIME_COL = "occurred_at"
+
+
 def dataset(name, sql=None, schema="bi"):
     ds = find("dataset", "table_name", name)
     body = {"database": db_id, "schema": schema, "table_name": name}
@@ -56,8 +64,11 @@ def dataset(name, sql=None, schema="bi"):
     if ds:
         if sql:
             api("PUT", f"dataset/{ds}", json={"sql": sql})
-        return ds
-    return api("POST", "dataset/", json=body)["id"]
+    else:
+        ds = api("POST", "dataset/", json=body)["id"]
+    # the default time column of the dataset, used when a chart does not name one
+    api("PUT", f"dataset/{ds}", json={"main_dttm_col": TIME_COL})
+    return ds
 
 
 violation_ds = dataset("violation")
@@ -107,6 +118,11 @@ def make_charts(ds, suffix, names):
     """All charts of the traffic dashboard on dataset ds; suffix keeps chart names unique.
     Fills names with {chart id: title without suffix}."""
     def c(name, viz, params):
+        # Every chart carries the real timestamp column, even the ones that plot a
+        # text dimension: Superset only applies a time range when the query has a
+        # temporal column, so without this the dashboard's Jalali date filter would
+        # do nothing to them. See JALALI_CALENDAR.md.
+        params.setdefault("granularity_sqla", TIME_COL)
         cid = chart(name + suffix, viz, params, ds)
         names[cid] = name
         return cid
@@ -319,17 +335,19 @@ def build_dashboard(ds, slug, title, suffix="", extra_fleet_row=None):
                 "cascadeParentIds": [], "scope": {"rootPath": ["ROOT_ID"], "excluded": []},
                 "chartsInScope": [cid for k, cid in charts.items() if k not in (extra_fleet_row or {})], "tabsInScope": list(tabs), "description": ""}
 
-    # Charts whose x axis is the real timestamp: only those can honour a time range.
-    # The rest group by the jalali_date/jalali_month *text* columns (see README).
-    TIME_AXIS_CHARTS = ["jalali_daily", "jalali_monthly", "jalali_quarter", "jalali_week"]
-
     def time_filter(fid, name, default):
         """Native time-range filter. It renders the same DateFilterControl a chart
         uses, so it offers the Jalali shortcuts ("ماه جاری (شمسی)", "از ابتدای سال تا
         امروز") and the Jalali calendar, and stores whatever the server can resolve
-        (superset/jalali_calendar/ranges.py). The default below is a Jalali literal
-        range covering the demo data, which only has a few days of 1403-12 and 1404-01."""
-        scoped = [charts[key] for key in TIME_AXIS_CHARTS if key in charts]
+        (superset/jalali_calendar/ranges.py), which converts it to a Gregorian range
+        on occurred_at. It reaches every chart on this dataset - including the ones
+        that group by the jalali_date text column - because make_charts() gives them
+        all granularity_sqla.
+
+        The default is a fixed Jalali range: the demo data only has a few days of
+        1403-12 and 1404-01, so a relative default would show empty charts."""
+        scoped = [cid for key, cid in charts.items()
+                  if key not in (extra_fleet_row or {})]
         return {"id": fid, "name": name, "filterType": "filter_time", "type": "NATIVE_FILTER",
                 "targets": [{}], "controlValues": {},
                 "defaultDataMask": {"extraFormData": {"time_range": default},

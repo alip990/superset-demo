@@ -53,6 +53,14 @@ def dataset(name, sql=None):
 
 
 sales_ds = dataset("sales")
+# The temporal column of the sales dataset. A chart only honours a time range if
+# its query has one (superset/models/helpers.py applies the time filter only when
+# `granularity` is set), which is why every chart below gets it even when it does
+# not plot time: without it the dashboard's Jalali date filter would silently do
+# nothing to the charts that group by the jalali_month text column.
+# See "Making the filter reach every chart" in JALALI_CALENDAR.md.
+TIME_COL = "sale_date"
+api("PUT", f"dataset/{sales_ds}", json={"main_dttm_col": TIME_COL})
 branch_ds = dataset("sales_by_branch", sql="""
 SELECT branch_name, province_fa, region, lat, lon, SUM(amount) AS total_amount, COUNT(*) AS orders
 FROM sales GROUP BY 1,2,3,4,5""")
@@ -69,6 +77,8 @@ SUM_AMOUNT = {"expressionType": "SQL", "sqlExpression": "SUM(amount)", "label": 
 def chart(name, viz, ds, params):
     cid = find("chart", "slice_name", name)
     params = {"viz_type": viz, "datasource": f"{ds}__table", **params}
+    if ds == sales_ds:  # the only dataset here with a date column
+        params.setdefault("granularity_sqla", TIME_COL)
     body = {"slice_name": name, "viz_type": viz, "datasource_id": ds, "datasource_type": "table",
             "params": json.dumps(params)}
     if cid:
@@ -124,8 +134,30 @@ for i, row in enumerate(rows):
         pos[rid]["children"].append(node["id"])
         pos[node["id"]] = node
 
+# Native Jalali date filter. It renders the same control a chart uses, so it
+# offers the Jalali shortcuts and the Jalali calendar (plugins/superset-jalali)
+# and stores whatever the server can resolve (superset/jalali_calendar). Scoped to
+# the charts on the sales dataset: sales_by_branch has no date column.
+time_scope = [cid for key, cid in charts.items() if key != "map"]
+jalali_filter = {
+    "id": "NATIVE_FILTER-jalali-range", "name": "بازه زمانی (شمسی)",
+    "filterType": "filter_time", "type": "NATIVE_FILTER", "targets": [{}],
+    "controlValues": {},
+    # dynamic on purpose: "from the start of the Jalali year until today" stays
+    # correct next month, and the mock data is generated relative to today
+    "defaultDataMask": {"extraFormData": {"time_range": "jalali year to date"},
+                        "filterState": {"value": "jalali year to date"},
+                        "ownState": {}},
+    "cascadeParentIds": [],
+    "scope": {"rootPath": ["ROOT_ID"],
+              "excluded": [cid for cid in charts.values() if cid not in time_scope]},
+    "chartsInScope": time_scope, "tabsInScope": [], "description": "",
+}
+
 dash_body = {"dashboard_title": "داشبورد فروش", "slug": "sales-fa", "published": True,
-             "position_json": json.dumps(pos), "json_metadata": json.dumps({"refresh_frequency": 0})}
+             "position_json": json.dumps(pos),
+             "json_metadata": json.dumps({"refresh_frequency": 0,
+                                          "native_filter_configuration": [jalali_filter]})}
 dash_id = find("dashboard", "slug", "sales-fa")
 if dash_id:
     api("PUT", f"dashboard/{dash_id}", json=dash_body)

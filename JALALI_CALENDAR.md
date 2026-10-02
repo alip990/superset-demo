@@ -191,6 +191,54 @@ Superset stores, so a chart saved with it opens in a stock Superset unchanged.
 The control's pill, its tooltip and the popover's *Actual time range* line show
 the resolved range in Jalali (`1404-01-01 ≤ col < 1404-02-01`).
 
+### What the filter turns into
+
+Nothing Jalali reaches the database. The server resolves the expression and the
+query gets ordinary Gregorian dates on the real timestamp column:
+
+```
+picked in the dashboard   "ماه مرداد" -> jalali:1404-05
+resolved by the server    2025-07-23T00:00:00 : 2025-08-23T00:00:00
+sent to PostgreSQL        WHERE sale_date >= TO_DATE('2025-07-23', 'YYYY-MM-DD')
+                            AND sale_date <  TO_DATE('2025-08-23', 'YYYY-MM-DD')
+```
+
+Which means the Jalali range and its Gregorian twin produce byte-identical SQL -
+asserted by `tests/test_filter_binding.py` - so nothing downstream (engine, cache
+key, CSV export, alert) can tell the difference.
+
+### Making the filter reach every chart
+
+A time range only filters a query that **has a temporal column**.
+`superset/models/helpers.py` is explicit about it - *"granularity: Time
+granularity (if None, time_filters not applied)"* - and it finds that column from
+the chart's `TEMPORAL_RANGE` filter, its `granularity`, or its x axis, in that
+order. So a chart that plots the `jalali_date` **text** column, or a pie chart
+with no time axis at all, has nothing to filter on, and a dashboard date filter
+is silently a no-op on it. Measured against the running demo:
+
+| What the chart's query carries | Filtered? |
+|---|---|
+| `time_range` only (what a dashboard filter sends) | **no** - 19 of 19 months returned |
+| `time_range` + `granularity: sale_date` | yes |
+| a `TEMPORAL_RANGE` filter on `sale_date` | yes |
+| both, the chart's own filter saying "No filter" | yes - the dashboard's range wins |
+
+So every chart that a Jalali date filter should reach needs a **Time column**:
+`granularity_sqla` in its `params` (the *Time column* control in Explore).
+`superset/bootstrap.py` and `superset/bootstrap_traffic.py` set it on every chart
+of the dataset, time axis or not, and also set the dataset's `main_dttm_col`. The
+demo dashboards therefore have one Jalali date filter that filters **all** of
+their charts - the Jalali-grain time series, the text-axis bars, the pies, the
+KPIs - and `tests/test_filter_binding.py` fails if a chart in the filter's scope
+loses its time column.
+
+The filter's default value is deliberately different in the two demos:
+`sales-fa` uses `jalali year to date`, which stays correct as time passes because
+its mock data is generated relative to today; the traffic dashboards use the
+fixed `jalali:1403-12-01 : jalali:1404-02-01`, because that data is a snapshot of
+a few days in 1403-12 and 1404-01 and a relative default would show empty charts.
+
 ---
 
 ## 1. Showing dates in Jalali
@@ -343,8 +391,9 @@ match). Rollback is `unset SUPERSET_IMAGE`.
 ## Tests
 
 ```bash
-tests/run.sh                                     # 61 Python tests + 17 plugin tests
+tests/run.sh                                      # 68 Python tests + 17 plugin tests
 JALALI_TEST_PG_DSN=postgresql://… tests/run.sh    # + the same grains in PostgreSQL
+SUPERSET_URL=http://localhost:8088 tests/run.sh   # + the filter against a live Superset
 ```
 
 | Suite | Checks |
@@ -353,6 +402,7 @@ JALALI_TEST_PG_DSN=postgresql://… tests/run.sh    # + the same grains in Postg
 | `tests/test_jalali_grains.py` | the magic constants recomputed from the calendar; every generated expression executed in **SQLite** for 109,938 days; the same in **PostgreSQL** when a DSN is given |
 | `tests/test_jalali_ranges.py` | every shortcut against a frozen "today", hand-checked against an Iranian calendar; that each one resolves (or the Apply button would be dead); that Gregorian ranges are untouched |
 | `tests/test_jalali_sql.py` | `db/jalali.sql` against the Python core for 44,000 days, `grain_mode: function` vs `inline` for 18,000 days, `dim_date` row by row, the holidays |
+| `tests/test_filter_binding.py` | against a **running** Superset: that a Jalali range reaches a text-axis chart, a dimensionless chart and the demo dashboard; that the dates in the SQL are the converted Jalali ones; that a Jalali range and its Gregorian twin give identical SQL; that `/api/v1/time_range/` agrees with the calendar. Needs `SUPERSET_URL`, skipped otherwise |
 | `plugins/superset-jalali/tests/` | the TypeScript calendar against `tests/fixtures/jalali_cases.json` (generated from Python) and against ICU; the range vocabulary against the backend's |
 | `npm run typecheck` | the plugin against hand-written declarations of the Superset modules **and against upstream's own call sites** |
 

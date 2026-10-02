@@ -4,6 +4,8 @@
 #   tests/run.sh                      calendar core, ranges, grains (SQLite), plugin
 #   JALALI_TEST_PG_DSN=... tests/run.sh   ... and the same grains in PostgreSQL,
 #                                         plus db/jalali.sql
+#   SUPERSET_URL=... tests/run.sh         ... and the Jalali date filter against a
+#                                         running Superset (tests/test_filter_binding.py)
 #
 # Against the demo stack (psycopg2 and the SQL library are already there):
 #   docker compose cp . superset:/tmp/repo 2>/dev/null || true
