@@ -1,0 +1,39 @@
+name: Jalali backend package
+
+on:
+  push:
+    tags: ['jalali-backend-v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  test-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm, cache-dependency-path: plugins/superset-jalali/package-lock.json}
+      - name: Match source tag and package version
+        run: |
+          TAG_VERSION=${GITHUB_REF_NAME#jalali-backend-v}
+          PROJECT_VERSION=$(uv run --no-project python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          test "$TAG_VERSION" = "$PROJECT_VERSION"
+      - name: Calendar, backend, and frontend tests
+        run: |
+          npm ci --prefix plugins/superset-jalali
+          sh tests/run.sh
+      - name: Build pure Python backend wheel (no Superset frontend build)
+        run: uv build --wheel --no-sources --out-dir dist
+      - name: Hash artifact
+        run: (cd dist && sha256sum superset_jalali_backend-*.whl > SHASUMS256.txt)
+      - name: Create private GitHub Release
+        env: {GH_TOKEN: '${{ github.token }}', GITHUB_REPOSITORY: '${{ github.repository }}'}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/superset_jalali_backend-*.whl dist/SHASUMS256.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Jalali backend ${GITHUB_REF_NAME#jalali-backend-v}" \
+            --notes "Built from source tag $GITHUB_REF_NAME; targets Apache Superset 6.1.0 only. Backend adapter uses the documented startup hook and pinned compatibility guard. No Superset frontend is built."

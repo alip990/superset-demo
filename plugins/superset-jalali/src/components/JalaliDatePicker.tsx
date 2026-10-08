@@ -37,7 +37,9 @@ import type { Dayjs } from 'dayjs';
 import { t } from '@apache-superset/core/translation';
 import { DatePicker, Input, Popover } from '@superset-ui/core/components';
 import { extendedDayjs } from '@superset-ui/core/utils/dates';
-import { formatJalali, parseLiteral } from '../core/jalali';
+import { formatJalali } from '../core/jalali';
+import { parsePickerText } from '../core/picker';
+import { storageToBusiness, businessToStorage } from '../core/timezone';
 import { getJalaliOptions, isJalaliEnabled } from '../options';
 import JalaliCalendarPanel from './JalaliCalendarPanel';
 
@@ -71,12 +73,14 @@ const fromUtc = (value: Date): Dayjs =>
 export default function JalaliDatePicker(props: JalaliDatePickerProps) {
   const { showTime, value, defaultValue, onChange, className, disabled,
     placeholder, getPopupContainer } = props;
-  const { digits } = getJalaliOptions();
+  const clock = getJalaliOptions();
+  const { digits } = clock;
   const persianDigits = digits === 'persian';
   const pattern = showTime ? DATETIME_PATTERN : DATE_PATTERN;
 
   const [current, setCurrent] = useState<Dayjs | undefined>(value ?? defaultValue);
   const [text, setText] = useState<string | null>(null);
+  const [invalid, setInvalid] = useState(false);
 
   // follow the value the frame hands back after each change
   const incoming = value ?? defaultValue;
@@ -85,6 +89,7 @@ export default function JalaliDatePicker(props: JalaliDatePickerProps) {
     if (incoming && (!current || !incoming.isSame(current))) {
       setCurrent(incoming);
       setText(null);
+      setInvalid(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingKey]);
@@ -93,17 +98,31 @@ export default function JalaliDatePicker(props: JalaliDatePickerProps) {
     if (text !== null) return text;
     if (!current) return '';
     try {
-      return formatJalali(toUtc(current), pattern, { persianDigits });
+      return formatJalali(storageToBusiness(toUtc(current), clock), pattern, { persianDigits });
     } catch {
       return current.format(pattern);
     }
-  }, [current, pattern, persianDigits, text]);
+  }, [current, pattern, persianDigits, text, clock]);
 
   function commit(utcDate: Date) {
-    const next = fromUtc(utcDate);
+    let next: Dayjs;
+    try {
+      next = fromUtc(businessToStorage(utcDate, clock));
+    } catch {
+      setInvalid(true);
+      return;
+    }
     setCurrent(next);
     setText(null);
+    setInvalid(false);
     onChange?.(next);
+  }
+
+  function confirmText() {
+    if (text === null) return;
+    const parsed = parsePickerText(text);
+    if (parsed) commit(parsed);
+    else setInvalid(true);
   }
 
   // Gregorian mode: behave exactly like the control this replaces
@@ -119,11 +138,12 @@ export default function JalaliDatePicker(props: JalaliDatePickerProps) {
       getPopupContainer={getPopupContainer}
       content={
         <JalaliCalendarPanel
-          value={current ? toUtc(current) : undefined}
+          value={current ? storageToBusiness(toUtc(current), clock) : undefined}
           onChange={commit}
           showTime={showTime}
           persianDigits={persianDigits}
           thursdayIsWeekend={getJalaliOptions().thursdayIsWeekend}
+          clock={clock}
         />
       }
     >
@@ -132,14 +152,18 @@ export default function JalaliDatePicker(props: JalaliDatePickerProps) {
         disabled={disabled}
         value={display}
         aria-label={t('Jalali date')}
+        aria-invalid={invalid}
         placeholder={placeholder ?? (showTime ? DATETIME_PATTERN : DATE_PATTERN)}
         onChange={event => {
           const next = event.target.value;
           setText(next);
-          const parsed = parseLiteral(next);
-          if (parsed) commit(parsed.date);
+          setInvalid(false);
         }}
-        onBlur={() => setText(null)}
+        onBlur={confirmText}
+        onKeyDown={event => {
+          if (event.key === 'Enter') confirmText();
+          if (event.key === 'Escape') { setText(null); setInvalid(false); }
+        }}
       />
     </Popover>
   );

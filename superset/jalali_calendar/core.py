@@ -17,10 +17,12 @@ The frontend plugin (plugins/superset-jalali/src/core/jalali.ts) is a literal
 port of this module, and tests/fixtures/jalali_cases.json is generated from here
 and asserted by both test suites, so the two sides can never drift apart.
 
-Verified against the ICU Persian calendar (Node ``Intl``, fa-IR-u-ca-persian)
-and against ``bi.to_jalali()`` from backups/02-bi.sql for every day between
-1900-01-01 and 2200-12-31: all three agree, 1403 is a leap year and
-1403-12-30 = 2025-03-20, as the official calendar has it.
+Canonical semantics: Borkowski arithmetic, shared with the TypeScript and SQL
+implementations. ICU 77 introduces a different leap correction at AP 1502;
+these calendars differ from 2124-03-20 through 2125-03-20. Tests assert that
+exact discrepancy rather than declaring ICU an oracle for every future year.
+Contemporary civil-calendar support is 1925..2089; wider conversions are
+proleptic arithmetic and are not a prediction of future official calendars.
 """
 
 from __future__ import annotations
@@ -57,9 +59,7 @@ _TO_LATIN = str.maketrans(PERSIAN_DIGITS + ARABIC_DIGITS, "0123456789" * 2)
 # Borkowski's breaks table spans these Jalali years; outside them a conversion
 # raises instead of returning a wrong date.
 DOMAIN_MIN_YEAR, DOMAIN_MAX_YEAR = -61, 3177
-# Inside this narrower window the result is the *official* Iranian calendar.
-# Literal parsing is restricted to it, which is also what keeps a Gregorian date
-# from ever being read as a Jalali one: no real data is from the 15th century.
+# Literal disambiguation window, NOT a claim of official future validity.
 MIN_YEAR, MAX_YEAR = 1178, 1633
 
 # Jalali months 1..6 have 31 days, 7..11 have 30, Esfand has 29 or 30.

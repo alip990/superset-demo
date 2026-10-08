@@ -31,8 +31,9 @@ module publishes to the browser.
         picker's shortcut list, digits and timezone shift come from this config
         instead of being hard-coded in the frontend bundle.
 
-install() is idempotent and never raises on a Superset it does not recognise: it
-logs what it could not patch and leaves Superset working in Gregorian.
+install() is idempotent for the pinned host process. It raises on an unsupported
+Superset release or contradictory calendar configuration instead of silently
+installing a partial adapter.
 """
 
 from __future__ import annotations
@@ -41,13 +42,16 @@ import functools
 import logging
 import re
 import sys
+from importlib.metadata import version
 from typing import Any
 
-from . import core, grains, jinja, ranges
+from . import core, grains, jinja, ranges, timezone
 
 logger = logging.getLogger(__name__)
 
 OPTIONS_KEY = "JALALI_CALENDAR_OPTIONS"
+FRONTEND_OPTIONS_KEY = "JALALI_CALENDAR_FRONTEND_OPTIONS"
+SUPPORTED_SUPERSET = ('6.1.0',)
 
 DEFAULT_OPTIONS: dict[str, Any] = {
     # master switch read by the frontend plugin; False leaves Superset Gregorian
@@ -61,6 +65,8 @@ DEFAULT_OPTIONS: dict[str, Any] = {
     # when the database stores local time (this repo's occurred_at does), 210
     # for UTC data read by an Asia/Tehran business
     "shift_minutes": 0,
+    "storage_timezone": "wall",
+    "business_timezone": "Asia/Tehran",
     # accept "1403-12-20" as a Jalali date without the "jalali:" prefix
     "bare_literals": True,
     # "inline" needs nothing installed in the database; "function" uses the
@@ -76,10 +82,7 @@ DEFAULT_OPTIONS: dict[str, Any] = {
 def options(app: Any = None) -> dict[str, Any]:
     """Defaults merged with the JALALI_CALENDAR_OPTIONS dict from the config.
 
-    Only keys this module knows are taken, which catches a typo in the config and
-    keeps install() idempotent: _expose_options() replaces the same config key
-    with the camelCase payload the browser reads, so a second install() in the
-    same process must not mistake that payload for configuration."""
+    Publishing browser options must never overwrite this configuration."""
     merged = dict(DEFAULT_OPTIONS)
     config = (app.config.get(OPTIONS_KEY) or {}) if app is not None else {}
     unknown = [key for key in config if key not in DEFAULT_OPTIONS]
@@ -88,6 +91,7 @@ def options(app: Any = None) -> dict[str, Any]:
         logger.warning("jalali: ignoring unknown %s keys: %s", OPTIONS_KEY,
                        ", ".join(sorted(set(unknown) - _PUBLISHED_KEYS)))
     merged.update(known)
+    timezone.from_options(merged)  # fail early on contradictory timezone settings
     return merged
 
 
@@ -107,6 +111,8 @@ def _published_options(opts: dict[str, Any]) -> dict[str, Any]:
         "digits": opts["digits"],
         "overrideSmartDate": opts["override_smart_date"],
         "shiftMinutes": opts["shift_minutes"],
+        "storageTimezone": opts["storage_timezone"],
+        "businessTimezone": opts["business_timezone"],
         "thursdayIsWeekend": opts["thursday_is_weekend"],
         "monthNames": list(core.MONTH_NAMES),
         "weekdayNames": list(core.WEEKDAY_NAMES),
@@ -127,7 +133,8 @@ def _configure_grains(app: Any, opts: dict[str, Any]) -> int:
         for grain in opts["grains"]
     }
     expressions = grains.time_grain_addon_expressions(
-        tuple(opts["grains"]), opts["shift_minutes"], opts["grain_mode"]
+        tuple(opts["grains"]), opts["shift_minutes"], opts["grain_mode"],
+        business_timezone=(opts['business_timezone'] if opts['storage_timezone'] == 'UTC' else None),
     )
     addons = dict(app.config.get("TIME_GRAIN_ADDONS") or {})
     addons.update(labels)
@@ -153,7 +160,6 @@ def _patch_date_parser(opts: dict[str, Any]) -> bool:
     original = date_parser.get_since_until
     if getattr(original, "_jalali_patched", False):
         return True
-    bare_literals = opts["bare_literals"]
 
     @functools.wraps(original)
     def get_since_until(  # pylint: disable=too-many-arguments
@@ -165,13 +171,14 @@ def _patch_date_parser(opts: dict[str, Any]) -> bool:
         relative_end: str | None = None,
         **kwargs: Any,
     ) -> Any:
-        try:
+        from flask import current_app
+        active = options(current_app)
+        if active['enabled']:
             rewritten = ranges.rewrite(
-                time_range, relative_start, relative_end, bare_literals
+                time_range, relative_start, relative_end, active['bare_literals'],
+                clock=timezone.from_options(active),
             )
-        except Exception:  # pylint: disable=broad-except  # noqa: BLE001
-            logger.warning("jalali: could not parse time range %r", time_range,
-                           exc_info=True)
+        else:
             rewritten = None
         if rewritten is not None:
             logger.debug("jalali: %r -> %r", time_range, rewritten)
@@ -268,13 +275,13 @@ def _patch_template_processor() -> bool:
 
 def _expose_options(app: Any, opts: dict[str, Any]) -> bool:
     """Publish the options in the bootstrap payload the browser receives."""
-    app.config[OPTIONS_KEY] = _published_options(opts)
+    app.config[FRONTEND_OPTIONS_KEY] = _published_options(opts)
     try:
         from superset.views import base  # pylint: disable=import-outside-toplevel
     except Exception:  # pylint: disable=broad-except  # noqa: BLE001
         return False
-    if OPTIONS_KEY not in base.FRONTEND_CONF_KEYS:
-        base.FRONTEND_CONF_KEYS = (*base.FRONTEND_CONF_KEYS, OPTIONS_KEY)
+    if FRONTEND_OPTIONS_KEY not in base.FRONTEND_CONF_KEYS:
+        base.FRONTEND_CONF_KEYS = (*base.FRONTEND_CONF_KEYS, FRONTEND_OPTIONS_KEY)
     return True
 
 
@@ -285,6 +292,11 @@ def install(app: Any = None) -> dict[str, Any]:
 
         app = current_app
     opts = options(app)
+    actual = version('apache-superset')
+    if actual not in SUPPORTED_SUPERSET:
+        raise RuntimeError(f'Jalali backend supports Superset {SUPPORTED_SUPERSET}; found {actual}')
+    if not opts['enabled']:
+        return {'enabled': False, 'options': opts}
     report = {
         "grains": _configure_grains(app, opts),
         "time_range_parser": _patch_date_parser(opts),

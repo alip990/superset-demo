@@ -190,6 +190,12 @@ export function fromJalali(
   jd: number,
   time: Partial<JalaliTime> = {},
 ): Date {
+  for (const [key, limit] of Object.entries({ hours: 23, minutes: 59, seconds: 59, milliseconds: 999 })) {
+    const value = time[key as keyof JalaliTime];
+    if (value !== undefined && (!Number.isInteger(value) || value < 0 || value > limit)) {
+      throw new RangeError(`Invalid ${key}: ${value}`);
+    }
+  }
   if (jm < 1 || jm > 12) throw new RangeError(`Jalali month out of range: ${jm}`);
   if (jd < 1 || jd > daysInMonth(jy, jm)) {
     throw new RangeError(`no day ${jd} in ${jy}-${jm}`);

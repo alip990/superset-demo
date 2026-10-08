@@ -1,0 +1,13 @@
+{
+  "name": "jalali-registry-probe",
+  "version": "0.1.0",
+  "private": true,
+  "peerDependencies": {"react": "^17.0.2", "react-dom": "^17.0.2"},
+  "scripts": {"build": "webpack --mode production"},
+  "devDependencies": {
+    "webpack": "5.105.4",
+    "webpack-cli": "6.0.1",
+    "react": "17.0.2",
+    "react-dom": "17.0.2"
+  }
+}

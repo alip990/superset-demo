@@ -40,6 +40,8 @@ export interface JalaliOptions {
   overrideSmartDate: boolean;
   /** minutes added to an instant before deciding which Jalali day it is */
   shiftMinutes: number;
+  storageTimezone: 'wall' | 'UTC';
+  businessTimezone: string;
   /** some employers count Thursday as weekend; shown greyed in the calendar */
   thursdayIsWeekend: boolean;
   /** the time-range shortcuts, grouped by the frame that shows them */
@@ -51,6 +53,8 @@ export const DEFAULT_OPTIONS: JalaliOptions = {
   digits: 'latin',
   overrideSmartDate: true,
   shiftMinutes: 0,
+  storageTimezone: 'wall',
+  businessTimezone: 'Asia/Tehran',
   thursdayIsWeekend: false,
   ranges: DEFAULT_RANGES,
 };
@@ -64,7 +68,8 @@ export function getJalaliOptions(): JalaliOptions {
   let featureFlag = false;
   try {
     const common = getBootstrapData()?.common;
-    published = (common?.conf?.JALALI_CALENDAR_OPTIONS ?? {}) as Partial<JalaliOptions>;
+    published = (common?.conf?.JALALI_CALENDAR_FRONTEND_OPTIONS
+      ?? common?.conf?.JALALI_CALENDAR_OPTIONS ?? {}) as Partial<JalaliOptions>;
     featureFlag = Boolean(
       (common?.feature_flags as unknown as Record<string, boolean>)?.JALALI_CALENDAR,
     );

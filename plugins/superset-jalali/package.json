@@ -7,13 +7,22 @@
   "comment": "Not installed into superset-frontend: superset/Dockerfile copies src/ into superset-frontend/src/jalali/ and the patches hook it in, so Superset's own package-lock.json stays untouched and `npm ci` keeps working. These devDependencies only exist to type-check and test this directory on its own.",
   "scripts": {
     "test": "tsc -p tsconfig.test.json && node dist-test/tests/jalali.test.js",
+    "test:components": "vitest run",
     "typecheck": "tsc -p tsconfig.json",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test && npm run test:components"
   },
+  "peerDependencies": {"react": "^17.0.2", "react-dom": "^17.0.2"},
   "devDependencies": {
-    "@types/node": "^18.19.0",
-    "@types/react": "^18.3.31",
+    "@types/node": "18.19.130",
+    "@types/react": "17.0.89",
+    "@types/react-dom": "17.0.26",
     "dayjs": "^1.11.10",
-    "typescript": "^5.4.5"
+    "typescript": "5.4.5",
+    "react": "17.0.2",
+    "react-dom": "17.0.2",
+    "@testing-library/react": "12.1.5",
+    "@testing-library/user-event": "13.5.0",
+    "vitest": "1.6.1",
+    "jsdom": "26.1.0"
   }
 }

@@ -54,8 +54,10 @@ declare module '@superset-ui/core/components' {
     value?: string;
     placeholder?: string;
     'aria-label'?: string;
+    'aria-invalid'?: boolean;
     onChange?: (event: { target: { value: string } }) => void;
     onBlur?: () => void;
+    onKeyDown?: (event: { key: string }) => void;
   }) => JSX.Element;
   export const Popover: (props: {
     trigger?: string;

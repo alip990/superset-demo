@@ -33,6 +33,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '@apache-superset/core/translation';
 import { css, styled } from '@apache-superset/core/theme';
 import { Button, Input, Select } from '@superset-ui/core/components';
+import { parseTime } from '../core/picker';
+import { businessNow, ClockOptions } from '../core/timezone';
 import {
   MONTH_NAMES,
   WEEKDAY_NAMES_SHORT,
@@ -54,6 +56,7 @@ export interface JalaliCalendarPanelProps {
   thursdayIsWeekend?: boolean;
   /** years offered in the year dropdown, around the selected one */
   yearSpan?: number;
+  clock?: ClockOptions;
 }
 
 const Wrapper = styled.div`
@@ -134,9 +137,10 @@ const digits = (value: number | string, persian?: boolean) =>
   (persian ? toPersianDigits(String(value)) : String(value));
 
 /** Today as a UTC wall-clock instant, so "today" means the user's today. */
-function todayUtc(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+function todayUtc(clock: ClockOptions): Date {
+  const now = businessNow(clock);
+  now.setUTCHours(0, 0, 0, 0);
+  return now;
 }
 
 export default function JalaliCalendarPanel({
@@ -146,8 +150,9 @@ export default function JalaliCalendarPanel({
   persianDigits = false,
   thursdayIsWeekend = false,
   yearSpan = 60,
+  clock = { storageTimezone: 'wall', businessTimezone: 'Asia/Tehran', shiftMinutes: 0 },
 }: JalaliCalendarPanelProps) {
-  const selected = value ?? todayUtc();
+  const selected = value ?? todayUtc(clock);
   const selectedParts = toJalali(selected);
   const [{ jy, jm }, setShown] = useState({
     jy: selectedParts.jy,
@@ -163,7 +168,7 @@ export default function JalaliCalendarPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected.getTime()]);
 
-  const today = todayUtc();
+  const today = todayUtc(clock);
   const todayParts = toJalali(today);
   const monthLength = daysInMonth(jy, jm);
   // weekday of the 1st, 0 = Saturday: how many blanks the grid starts with
@@ -176,11 +181,10 @@ export default function JalaliCalendarPanel({
 
   const emit = useCallback(
     (day: number, time = timeText) => {
-      const [hours = 0, minutes = 0, seconds = 0] = time
-        .split(':')
-        .map(part => Number(part) || 0);
+      const parsed = parseTime(time);
+      if (!parsed) return;
       onChange(fromJalali(jy, jm, Math.min(day, daysInMonth(jy, jm)),
-        { hours, minutes, seconds }));
+        parsed));
     },
     [jm, jy, onChange, timeText],
   );
@@ -273,7 +277,7 @@ export default function JalaliCalendarPanel({
         <Button buttonSize="xsmall" buttonStyle="link"
           onClick={() => {
             setShown({ jy: todayParts.jy, jm: todayParts.jm });
-            onChange(showTime ? new Date() : today);
+            onChange(showTime ? businessNow(clock) : today);
           }}>
           {t('امروز')}
         </Button>
@@ -282,10 +286,11 @@ export default function JalaliCalendarPanel({
             className="jalali-time"
             aria-label={t('Time')}
             value={timeText}
+            aria-invalid={parseTime(timeText) === null}
             onChange={event => {
               const next = event.target.value;
               setTimeText(next);
-              if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(next)) {
+              if (parseTime(next)) {
                 emit(selectedParts.jy === jy && selectedParts.jm === jm
                   ? selectedParts.jd : 1, next);
               }

@@ -11,4 +11,15 @@ __pycache__/
 # plugin type-check / test toolchain (see plugins/superset-jalali/README.md)
 plugins/superset-jalali/node_modules/
 plugins/superset-jalali/dist-test/
-plugins/superset-jalali/package-lock.json
+.venv-jalali/
+build/
+dist/
+*.egg-info/
+extensions/*/frontend/node_modules/
+extensions/*/frontend/dist/
+extensions/*/dist/
+extensions/*/*.supx
+tests/browser/node_modules/
+tests/browser/test-results/
+tests/browser/playwright-report/
+deployment/independent/.state/

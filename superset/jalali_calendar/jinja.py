@@ -20,7 +20,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from . import core, grains, ranges
+from . import core, grains, ranges, timezone
 
 ISO_DATE = "%Y-%m-%d"
 ISO_DATETIME = "%Y-%m-%d %H:%M:%S"
@@ -53,7 +53,7 @@ def _parse_value(value: object) -> dt.date | dt.datetime:
 # ------------------------------------------------- time-dependent macros -----
 def jalali_today(self, fmt: str = "YYYY-MM-DD", persian_digits: bool = False) -> str:
     """Today's Jalali date as text, e.g. ``1404-07-09``."""
-    out = core.format_jalali(dt.date.today(), fmt, persian_digits)
+    out = core.format_jalali(timezone.current().now().date(), fmt, persian_digits)
     self.cache_key_wrapper(f"jalali_today:{out}")
     return out
 
@@ -62,7 +62,7 @@ def jalali_now(self, fmt: str = "YYYY-MM-DD HH:mm:ss",
                persian_digits: bool = False) -> str:
     """Current Jalali date and time as text. Changes every second, so a query
     using it is effectively uncacheable - that is intentional."""
-    out = core.format_jalali(dt.datetime.now(), fmt, persian_digits)
+    out = core.format_jalali(timezone.current().now(), fmt, persian_digits)
     self.cache_key_wrapper(f"jalali_now:{out}")
     return out
 
@@ -71,10 +71,11 @@ def jalali_start(self, unit: str = "month", offset: int = 0,
                  fmt: str = ISO_DATETIME) -> str:
     """Start of the current Jalali period, shifted by ``offset`` periods:
     ``{{ jalali_start('month', -1) }}`` is the 1st of last Jalali month."""
-    start = core.PERIOD_STARTS[unit](dt.date.today())
+    clock = timezone.current()
+    start = core.PERIOD_STARTS[unit](clock.now().date())
     if offset:
         start = core.add_period(start, offset, unit)
-    out = dt.datetime.combine(start, dt.time()).strftime(fmt)
+    out = clock.to_storage(dt.datetime.combine(start, dt.time()), boundary=True).strftime(fmt)
     self.cache_key_wrapper(f"jalali_start:{unit}:{offset}:{out}")
     return out
 
@@ -82,9 +83,10 @@ def jalali_start(self, unit: str = "month", offset: int = 0,
 def jalali_end(self, unit: str = "month", offset: int = 0,
                fmt: str = ISO_DATETIME) -> str:
     """Exclusive end of the current Jalali period, shifted by ``offset``."""
-    start = core.PERIOD_STARTS[unit](dt.date.today())
+    clock = timezone.current()
+    start = core.PERIOD_STARTS[unit](clock.now().date())
     end = core.add_period(start, offset + 1, unit)
-    out = dt.datetime.combine(end, dt.time()).strftime(fmt)
+    out = clock.to_storage(dt.datetime.combine(end, dt.time()), boundary=True).strftime(fmt)
     self.cache_key_wrapper(f"jalali_end:{unit}:{offset}:{out}")
     return out
 
@@ -96,10 +98,11 @@ def jalali_filter(self, column: str, expression: str = "Current jalali month") -
         WHERE {{ jalali_filter('occurred_at', 'jalali year to date') }}
     """
     col = _identifier(column)
-    resolved = ranges.resolve(expression)
+    clock = timezone.current()
+    resolved = ranges.resolve(expression, clock.now())
     if resolved is None:
         raise ValueError(f"not a Jalali time range: {expression!r}")
-    since, until = resolved
+    since, until = (clock.to_storage(part, boundary=True) for part in resolved)
     out = (f"{col} >= '{since.strftime(ISO_DATETIME)}'"
            f" AND {col} < '{until.strftime(ISO_DATETIME)}'")
     self.cache_key_wrapper(f"jalali_filter:{col}:{expression}:{out}")
@@ -110,7 +113,10 @@ def jalali_filter(self, column: str, expression: str = "Current jalali month") -
 def to_jalali(self, value: object, fmt: str = "YYYY-MM-DD",  # noqa: ARG001
               persian_digits: bool = False) -> str:
     """Format a Gregorian date/datetime (or an ISO string) in Jalali."""
-    return core.format_jalali(_parse_value(value), fmt, persian_digits)
+    parsed = _parse_value(value)
+    if isinstance(parsed, dt.datetime):
+        parsed = timezone.current().from_storage(parsed)
+    return core.format_jalali(parsed, fmt, persian_digits)
 
 
 def from_jalali(self, literal: str) -> str:  # noqa: ARG001
@@ -135,7 +141,9 @@ def jalali_grain(self, column: str, unit: str = "month",  # noqa: ARG001
     engine_name = engine or _engine_of(self) or "postgresql"
     if engine_name not in grains.DIALECTS_BY_ENGINE:
         raise ValueError(f"no Jalali grain SQL for engine {engine_name!r}")
-    return grains.grain_expression(engine_name, grain, col)
+    clock = timezone.current()
+    return grains.grain_expression(engine_name, grain, col, clock.shift_minutes,
+        business_timezone=(clock.business_timezone if clock.storage_timezone == 'UTC' else None))
 
 
 def _engine_of(extra_cache: object) -> str | None:

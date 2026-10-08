@@ -46,6 +46,7 @@ import {
   formatSmart,
 } from './core/jalali';
 import { getJalaliOptions } from './options';
+import { storageToBusiness } from './core/timezone';
 
 export const JALALI_SMART_ID = 'jalali_smart';
 
@@ -73,9 +74,10 @@ type FormatFunc = (value: Date) => string;
 
 function formatterFor(id: string, options: FormatOptions): FormatFunc {
   const pattern = NAMED_FORMATS[id];
+  const clock = getJalaliOptions();
   return pattern === undefined
-    ? (value: Date) => formatSmart(value, options)
-    : (value: Date) => formatJalali(value, pattern, options);
+    ? (value: Date) => formatSmart(storageToBusiness(value, clock), options)
+    : (value: Date) => formatJalali(storageToBusiness(value, clock), pattern, options);
 }
 
 function register(id: string, title: string, formatFunc: FormatFunc,
@@ -100,12 +102,11 @@ function register(id: string, title: string, formatFunc: FormatFunc,
 
 /** Register every Jalali time format. Returns the ids registered. */
 export default function registerJalaliFormatters(): string[] {
-  const { digits, enabled, shiftMinutes, overrideSmartDate } = getJalaliOptions();
+  const { digits, enabled, overrideSmartDate } = getJalaliOptions();
   const base: FormatOptions = {
     persianDigits: digits === 'persian',
-    shiftMinutes,
   };
-  const persian: FormatOptions = { persianDigits: true, shiftMinutes };
+  const persian: FormatOptions = { persianDigits: true };
   const registered: string[] = [];
 
   [JALALI_SMART_ID, ...Object.keys(NAMED_FORMATS)].forEach(id => {

@@ -42,6 +42,8 @@ import datetime as dt
 import re
 
 from . import core
+from .timezone import CalendarClock
+from zoneinfo import ZoneInfo
 
 SEPARATOR = " : "
 ISO = "%Y-%m-%dT%H:%M:%S"
@@ -112,10 +114,12 @@ def _anchor(now: dt.datetime | str | None) -> dt.datetime:
             now = dt.datetime.fromisoformat(now)
         except ValueError:
             now = None
-    return _midnight(now or dt.datetime.now())
+    return _midnight(now if now is not None else
+                     dt.datetime.now(ZoneInfo('Asia/Tehran')))
 
 
-def resolve(time_range: str, now: dt.datetime | str | None = None
+def resolve(time_range: str, now: dt.datetime | str | None = None,
+            bare_literals: bool = True
             ) -> tuple[dt.datetime, dt.datetime] | None:
     """Resolve a whole-string Jalali expression, or return None if the string is
     not one."""
@@ -149,7 +153,7 @@ def resolve(time_range: str, now: dt.datetime | str | None = None
         return today, _midnight(core.add_period(day, count, unit))
 
     # a single literal names a whole period: "jalali:1403-12" is all of Esfand
-    literal = parse_endpoint(text, require_prefix=False, whole_period=True)
+    literal = parse_endpoint(text, require_prefix=not bare_literals, whole_period=True)
     if literal is not None:
         return literal
     return None
@@ -169,6 +173,8 @@ def parse_endpoint(text: str, require_prefix: bool = False,
         return None
     parsed = core.parse_literal(stripped)
     if parsed is None:
+        if prefixed:
+            raise ValueError(f'Invalid Jalali literal: {text!r}')
         return None
     if whole_period:
         return parsed.datetime, parsed.period_end()
@@ -177,17 +183,19 @@ def parse_endpoint(text: str, require_prefix: bool = False,
 
 def rewrite(time_range: str | None, relative_start: str | None = None,
             relative_end: str | None = None, bare_literals: bool = True,
-            now: dt.datetime | None = None) -> str | None:
+            now: dt.datetime | None = None,
+            clock: CalendarClock | None = None) -> str | None:
     """Rewrite a Jalali time range into the ISO ``since : until`` form Superset
     understands, or return None when there is nothing Jalali about it."""
     if not time_range or not isinstance(time_range, str):
         return None
     text = time_range.strip()
+    clock = clock or CalendarClock()
     if SEPARATOR not in text:
-        resolved = resolve(text, now or relative_start)
+        resolved = resolve(text, clock.now(now or relative_start), bare_literals)
         if resolved is None:
             return None
-        since, until = resolved
+        since, until = (clock.to_storage(part, boundary=True) for part in resolved)
         return f"{since.strftime(ISO)}{SEPARATOR}{until.strftime(ISO)}"
 
     # "<since> : <until>": rewrite only the sides that are Jalali literals and
@@ -200,7 +208,15 @@ def rewrite(time_range: str | None, relative_start: str | None = None,
             out.append(part)
             continue
         touched = True
-        out.append(endpoint.strftime(ISO))  # type: ignore[union-attr]
+        out.append(clock.to_storage(endpoint).strftime(ISO))
+    if touched:
+        try:
+            start, end = (dt.datetime.fromisoformat(part) for part in out)
+        except ValueError:
+            pass  # mixed Superset expressions are validated by get_since_until
+        else:
+            if start > end:
+                raise ValueError('Range start must not be after its exclusive end')
     return SEPARATOR.join(out) if touched else None
 
 

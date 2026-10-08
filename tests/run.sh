@@ -17,14 +17,13 @@ set -e
 cd "$(dirname "$0")/.."
 
 echo "== python =="
-python3 -m unittest discover -s tests -v 2>&1 | tail -20
+"${PYTHON:-python3}" -m unittest discover -s tests -v
 
 echo
 echo "== plugins/superset-jalali =="
 if [ -d plugins/superset-jalali/node_modules ]; then
   (cd plugins/superset-jalali && npm run --silent check)
 else
-  echo "   skipped: run 'npm install' in plugins/superset-jalali first"
-  echo "   (it only installs typescript, @types/* and dayjs, for the offline"
-  echo "    type-check and the calendar tests)"
+  echo "ERROR: missing frontend test dependencies; run npm ci in plugins/superset-jalali" >&2
+  exit 1
 fi

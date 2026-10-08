@@ -1,0 +1,8 @@
+{
+  "publisher": "jalali-lab",
+  "name": "registry-probe",
+  "displayName": "Jalali integration diagnostic - NOT a calendar installation",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "permissions": []
+}

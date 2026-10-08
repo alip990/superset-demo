@@ -1,0 +1,62 @@
+name: jalali-independent-lab
+
+x-host: &host
+  image: apache/superset:6.1.0@sha256:16b50bbef6648912a79e3293d418fefa743ce555d36c5af6b85d859119ed7f88
+  env_file: .state/lab.env
+  environment:
+    SUPERSET_CONFIG_PATH: /lab/superset_config.py
+    PYTHONPATH: /lab-deps
+  volumes:
+    - ./superset_config.py:/lab/superset_config.py:ro
+    - ./seed.py:/lab/seed.py:ro
+    - ../../dist/active:/extensions:ro
+    - ../../dist/backend-active:/calendar:ro
+    - host-data:/app/superset_home
+    - drivers:/lab-deps:ro
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab-only
+      POSTGRES_DB: lab
+    ports: ["127.0.0.1:55439:5432"]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ../../db/jalali.sql:/docker-entrypoint-initdb.d/10-jalali.sql:ro
+      - ./seed.sql:/docker-entrypoint-initdb.d/20-seed.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U lab -d lab"]
+      interval: 2s
+      retries: 30
+  drivers:
+    <<: *host
+    user: root
+    # Build-only donor from this repository's pre-existing 6.1.0-pg layer. It
+    # only copies the already pinned 2.9.13 driver; the web/init host stays the
+    # official digest above and no donor Superset process is ever started.
+    image: superset-demo:6.1.0-pg
+    volumes:
+      - drivers:/lab-deps
+    command: ["/bin/sh", "-ec", "cp -a /app/.venv/lib/python3.10/site-packages/psycopg2 /lab-deps/; cp -a /app/.venv/lib/python3.10/site-packages/psycopg2_binary-2.9.13.dist-info /lab-deps/; cp -a /app/.venv/lib/python3.10/site-packages/psycopg2_binary.libs /lab-deps/"]
+  init:
+    <<: *host
+    depends_on:
+      db: {condition: service_healthy}
+      drivers: {condition: service_completed_successfully}
+    command: ["/bin/sh", "-ec", "superset db upgrade; superset init; python /lab/seed.py"]
+  web:
+    <<: *host
+    ports: ["127.0.0.1:18088:8088"]
+    depends_on:
+      init: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:8088/health]
+      interval: 5s
+      retries: 60
+
+volumes:
+  host-data:
+  pg-data:
+  drivers:

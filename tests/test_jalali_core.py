@@ -250,13 +250,23 @@ class TestIcuCrossCheck(unittest.TestCase):
             raise unittest.SkipTest(f"node with full ICU not available: {ex}")
         cls.icu = result.stdout.split()
 
-    def test_every_day_matches_icu(self):
+    def test_every_day_matches_icu_with_documented_1502_correction(self):
         day = dt.date(1900, 1, 1)
         self.assertGreater(len(self.icu), 100000)
+        mismatches = []
         for value in self.icu:
             jy, jm, jd = (int(part) for part in value.split("-"))
-            self.assertEqual(core.to_jalali(day), (jy, jm, jd), day.isoformat())
+            if core.to_jalali(day) != (jy, jm, jd):
+                mismatches.append(day)
             day += dt.timedelta(days=1)
+        # ICU release-77-1/persncal.cpp explicitly moves the leap day from
+        # AP 1502 to 1503. Borkowski and our SQL retain the original arithmetic.
+        # Older ICU has no correction. Fail on ANY other divergence.
+        corrected = self.icu[(dt.date(2124, 3, 20) - dt.date(1900, 1, 1)).days] == '1503-1-1'
+        expected = [dt.date(2124, 3, 20) + dt.timedelta(days=i) for i in range(366)] if corrected else []
+        self.assertEqual(mismatches, expected)
+        self.assertEqual(core.to_jalali(dt.date(2124, 3, 20)), (1502, 12, 30))
+        self.assertEqual(core.to_jalali(dt.date(2125, 3, 20)), (1503, 12, 29))
 
 
 class TestSharedFixtures(unittest.TestCase):

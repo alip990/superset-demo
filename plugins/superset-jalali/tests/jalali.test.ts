@@ -289,7 +289,7 @@ test('the range vocabulary matches the backend', () => {
 });
 
 // --------------------------------------------------------------------- ICU ----
-test('every day of 1900..2200 matches the ICU Persian calendar', () => {
+test('1900..2200 matches ICU except its explicit AP1502 leap correction', () => {
   let formatter: Intl.DateTimeFormat;
   try {
     formatter = new Intl.DateTimeFormat('fa-IR-u-ca-persian-nu-latn', {
@@ -303,15 +303,24 @@ test('every day of 1900..2200 matches the ICU Persian calendar', () => {
     process.stdout.write('  (skipped: Intl has no Persian calendar here)\n');
     return;
   }
+  const mismatches: string[] = [];
+  const corrected = formatter.format(utc('2124-03-20')).includes('1503');
   for (let time = Date.UTC(1900, 0, 1); time <= Date.UTC(2200, 11, 31);
     time += 86400000) {
     const date = new Date(time);
     const parts: Record<string, string> = {};
     formatter.formatToParts(date).forEach(part => { parts[part.type] = part.value; });
-    assert.deepStrictEqual(jalali.toJalali(date), {
+    const expected = {
       jy: Number(parts.year), jm: Number(parts.month), jd: Number(parts.day),
-    }, date.toISOString());
+    };
+    if (JSON.stringify(jalali.toJalali(date)) !== JSON.stringify(expected)) {
+      mismatches.push(date.toISOString().slice(0, 10));
+    }
   }
+  const known = corrected ? Array.from({ length: 366 }, (_, i) =>
+    new Date(Date.UTC(2124, 2, 20) + i * 86400000).toISOString().slice(0, 10)) : [];
+  assert.deepStrictEqual(mismatches, known);
+  assert.deepStrictEqual(jalali.toJalali(utc('2124-03-20')), { jy: 1502, jm: 12, jd: 30 });
 });
 
 process.stdout.write(`\n${passed} passed, ${failures.length} failed\n`);

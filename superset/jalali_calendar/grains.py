@@ -296,10 +296,23 @@ def function_grain_expression(grain: str, col: str = "{col}",
 
 
 def grain_expression(engine: str, grain: str, col: str = "{col}",
-                     shift_minutes: int = 0, mode: str = "inline") -> str:
+                     shift_minutes: int = 0, mode: str = "inline",
+                     business_timezone: str | None = None) -> str:
     """One grain expression for one engine, with ``{col}`` left in place for
     Superset to substitute. ``mode`` is "inline" (self-contained arithmetic) or
     "function" (needs db/02-jalali.sql; falls back to inline off Postgres)."""
+    if business_timezone:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(business_timezone)
+        if engine != 'postgresql':
+            raise ValueError('IANA UTC-storage grains are verified only on PostgreSQL')
+        if shift_minutes:
+            raise ValueError('Do not combine IANA timezone and fixed offset')
+        zone = business_timezone.replace("'", "''")
+        # Contract: {col} is a timestamp WITHOUT time zone containing UTC.
+        wall = f"(({col}) AT TIME ZONE 'UTC' AT TIME ZONE '{zone}')"
+        bucket = grain_expression(engine, grain, wall, mode=mode)
+        return f"((({bucket})::timestamp AT TIME ZONE '{zone}') AT TIME ZONE 'UTC')"
     if mode == "function" and engine in FUNCTION_ENGINES:
         return function_grain_expression(grain, col, shift_minutes)
     return DIALECTS_BY_ENGINE[engine].grain(grain, col, shift_minutes)
@@ -312,16 +325,17 @@ def time_grain_addons(labels: dict[str, str] | None = None) -> dict[str, str]:
 
 def time_grain_addon_expressions(
     grains: tuple[str, ...] | None = None, shift_minutes: int = 0,
-    mode: str = "inline",
+    mode: str = "inline", business_timezone: str | None = None,
 ) -> dict[str, dict[str, str]]:
     """Value for the TIME_GRAIN_ADDON_EXPRESSIONS config key: every grain for
     every supported engine."""
     wanted = grains or tuple(GRAIN_LABELS)
     return {
         engine: {
-            grain: grain_expression(engine, grain, "{col}", shift_minutes, mode)
+            grain: grain_expression(engine, grain, "{col}", shift_minutes, mode, business_timezone)
             for grain in wanted
         }
         for dialect in DIALECTS
         for engine in dialect.engines
+        if not business_timezone or engine == 'postgresql'
     }
