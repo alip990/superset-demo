@@ -69,7 +69,7 @@ sequenceDiagram
     EA-->>U: HTML page with iframe SDK
 
     U->>EA: GET /guest-token
-    EA->>EA: build RLS clause from user's regions
+    EA->>EA: build RLS clause from user's regions and selected Jalali range
     EA->>SS: POST /security/guest_token/ (dashboard UUID + RLS)
     SS-->>EA: signed JWT guest token
     EA-->>U: token
@@ -102,7 +102,7 @@ cd superset-demo
 The stock image lacks the Postgres driver, so build the small custom image referenced by `docker-compose.yml`:
 
 ```bash
-docker build -t superset-demo:6.1.0-pg ./superset
+docker build -t superset-demo:6.1.0-pg -f superset/Dockerfile .
 ```
 
 ### 3. Provide the map tiles
@@ -179,9 +179,9 @@ Three ideas to hold on to:
 
 | Concern | File | What to look at |
 |---|---|---|
-| Postgres DBs, sample data | `db/01-init.sql` | Creates `superset` (metadata) and `demo` (business) DBs; `provinces` → `branches` → `sales` (random data, ~540 days) and `user_access` |
-| Jalali calendar | `db/01-init.sql` | `to_jalali(date)` SQL function fills `jalali_date/month/year` columns; charts group on `jalali_month` |
-| Superset image | `superset/Dockerfile` | Stock `apache/superset:6.1.0` + `psycopg2-binary` |
+| Postgres DBs, sample data | `db/01-init.sql` | Creates `superset` (metadata) and `demo` (business) DBs; `provinces` → `branches` → `sales` (seeded random data, March 2024 onward) and `user_access` |
+| Jalali calendar | `packages/superset-jalali-sql/` | Dependency-free Python package renders inline PostgreSQL calendar math in virtual datasets; no business DB calendar objects |
+| Superset image | `superset/Dockerfile` | Stock `apache/superset:6.1.0` + `psycopg2-binary` + local calendar package |
 | Superset settings | `superset/superset_config.py` | Persian locale, feature flags, embedding/CORS, guest-token settings, deck.gl base map |
 | Provisioning | `superset/bootstrap.py` | REST API calls (connection, datasets, charts, dashboard layout, embedding) then ORM code for roles/users/RLS |
 | Host app | `embed-app/app.py`, `embed-app/index.html` | Fake users, guest-token endpoint, iframe via `@superset-ui/embedded-sdk` |
@@ -190,14 +190,14 @@ Three ideas to hold on to:
 #### Persian + Jalali
 
 - UI language: `BABEL_DEFAULT_LOCALE = "fa"` (English kept in `LANGUAGES`).
-- Superset has no native Jalali axis, so dates are pre-computed in SQL and used as plain text dimensions (`x_axis: "jalali_month"`). Trade-off: sorting works because `YYYY-MM` sorts lexically; there is no real date arithmetic.
+- Jalali dimensions are calculated inline in virtual dataset SELECTs with the macros described below. The business database stores Gregorian dates only.
 
 #### Bootstrap flow (`superset/bootstrap.py`)
 
 1. Log in as `admin`, fetch CSRF token.
 2. Create DB connection `Demo DB (mock)` using the read-only user `demo_reader`.
-3. Create datasets: `sales` (physical, with metric `total_amount`) and `sales_by_branch` (virtual, SQL aggregate for the map).
-4. Create 5 charts (`deck_scatter` map, big number, ECharts bar, pie, table) via `chart()` helper, which upserts by name.
+3. Create datasets: `sales` (physical), `sales_jalali` (virtual calendar dimensions, with metric `total_amount`) and `sales_by_branch` (virtual, SQL aggregate for the map).
+4. Create 9 charts (map, total, monthly, daily, seasonal, pivot, recent sales, category, province) via `chart()` helper, which upserts by name.
 5. Build `position_json` (grid rows/widths) and create dashboard slug `sales-fa`.
 6. Enable embedding → prints `EMBEDDED_DASHBOARD_UUID`.
 7. Use the Flask app context + ORM to create roles `DemoViewer`, `EmbedGuest`, `RegionalUser`, users, and the RLS filter.
@@ -208,11 +208,11 @@ Idempotency: helper `find(resource, col, value)` looks up by name/slug. Renaming
 
 1. Page load: app logs in to Superset as admin and reads the dashboard's embedded UUID.
 2. The SDK calls `fetchGuestToken()` → `GET /guest-token`.
-3. The app maps the current app user to regions and posts to `/api/v1/security/guest_token/` with `resources` (the dashboard) and `rls` clauses.
+3. The app maps the current app user to regions and the selected inclusive Jalali range to Gregorian dates, then posts to `/api/v1/security/guest_token/` with `resources` (the dashboard) and `rls` clauses.
 4. Superset returns a signed JWT (`GUEST_TOKEN_JWT_SECRET`, 10 min expiry, role `EmbedGuest`); the iframe uses it.
 5. Switching the user in the dropdown re-mounts the iframe with a new token.
 
-Important: the RLS clause is applied to **every dataset** in the dashboard, so all datasets need a `region` column.
+The global region rule applies to every dataset, so each exposes `region`. The date rule is scoped to physical `sales`; Superset injects it inside virtual queries before aggregation, including the map. Range changes remount the iframe.
 
 #### Map server (no plugin needed)
 
@@ -312,7 +312,7 @@ Notes:
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `pull access denied for superset-demo` | Custom image not built: `docker build -t superset-demo:6.1.0-pg ./superset` |
+| `pull access denied for superset-demo` | Custom image not built: `docker build -t superset-demo:6.1.0-pg -f superset/Dockerfile .` |
 | Map shows points but no base map | Tiles missing (`tiles/iran.mbtiles`), tileserver style name differs, or `localhost:8081` unreachable from the browser. Test `http://localhost:8081` |
 | Tileserver exits immediately | `iran.mbtiles` not found in `./tiles` |
 | Embedded dashboard blank / refused | CORS origin or iframe headers; check `CORS_OPTIONS` and the `embed-app` URL is exactly `http://localhost:8090` |
@@ -325,9 +325,9 @@ Notes:
 
 - Demo credentials and static secrets everywhere; Talisman/CSP disabled; `X-Frame-Options: ALLOWALL`.
 - `embed-app` logs in as `admin` to mint guest tokens. Production should use a dedicated service account with only guest-token permission.
-- Sample data is random; regenerated only on a fresh DB volume.
-- Jalali support is a SQL workaround, not native.
-- No automated tests and no CI.
+- Sample data uses a fixed seed; regenerated only on a fresh DB volume.
+- Superset native time grains and time comparisons remain Gregorian; use Jalali category dimensions.
+- Calendar, SQL, host validation, and guest-token smoke tests are included.
 - No custom plugin exists yet (see *Plugins* above).
 
 ### Suggested first-day path
@@ -343,9 +343,9 @@ Notes:
 ```
 .
 ├── docker-compose.yml        # all services
-├── db/01-init.sql            # creates DBs, Jalali function, mock sales data, user_access
+├── db/01-init.sql            # creates DBs, mock Gregorian sales data, user_access
 ├── superset/
-│   ├── Dockerfile            # Superset 6.1.0 + psycopg2
+│   ├── Dockerfile            # Superset 6.1.0 + psycopg2 + calendar macros
 │   ├── superset_config.py    # fa locale, feature flags, embedding, base map
 │   └── bootstrap.py          # provisions charts, dashboard, roles, users, RLS
 ├── embed-app/                # Flask host app (guest tokens + iframe)
@@ -356,3 +356,73 @@ Notes:
 ## Security Note
 
 This is a **demo**. It uses default credentials, a static JWT secret, CORS/iframe restrictions relaxed and Talisman disabled. Change `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, all passwords, and set a real CSP before any real deployment.
+
+
+## Jalali dates
+
+The package has no runtime dependencies. Python and PostgreSQL use the same committed Nowruz table for years 1350–1550. The generator cross-checks jdatetime 6.1.0 and persiantools 4.0.0; newer persiantools 6.2.0 has different future leap corrections from year 1503. See [verified facts](docs/VERIFIED_FACTS.md) for source checks and the supported calendar convention.
+
+The host accepts Latin, Persian and Arabic digits in `YYYY/MM/DD` or `YYYY-MM-DD`. It validates both dates, shows inclusive dates, and sends Gregorian half-open bounds on `sale_date`. Presets use Asia/Tehran and Saturday week starts. Use the **مهر ۱۴۰۳** preset to verify one monthly bar, `1403-07 مهر`; switch to `ali_north` and the total drops. Clearing the date filter restores all dates. Global region RLS still applies.
+
+## Writing Jalali datasets
+
+Create a virtual dataset in Superset using both macros together:
+
+```sql
+SELECT s.*, {{ jalali_columns('s.sale_date') }}
+FROM sales s
+{{ jalali_join('s.sale_date') }}
+```
+
+| Column | Purpose |
+|---|---|
+| `jalali_year` | Integer year |
+| `jalali_month_num` | Integer month |
+| `jalali_day` | Integer day |
+| `jalali_date` | Sortable `1403/07/18` text |
+| `jalali_date_int` | Numeric date key |
+| `jalali_month` | Sortable `1403-07` text |
+| `jalali_month_name` | Persian month name |
+| `jalali_month_label` | `1403-07 مهر`, chart and filter label |
+| `jalali_season` | Persian season name |
+| `jalali_season_key` | `1403-3 پاییز`, sortable season |
+| `jalali_weekday` | Persian weekday name |
+| `jalali_weekday_num` | Saturday = 0, Friday = 6 |
+| `jalali_week_start` | Gregorian date of Saturday |
+
+Optional arguments: `alias='_jy'` on both macros, `prefix='jalali_'` and `digits='persian'` on columns. `JALALI_SQL` config supports `dialect`, `min_year`, `max_year`, and `digits`. Unmatched and NULL dates produce NULL in every Jalali column. Helpers: `jalali_to_gregorian('1403/07/01')` and `jalali_period_sql('sale_date', 'this_month')`; supported periods also include `last_month`, `this_year`, `last_year`, `ytd`.
+
+Date limitations:
+
+- Superset time picker, grains, trendlines, comparisons, rolling windows and forecasting stay Gregorian.
+- Category axes skip periods without data.
+- Range changes remount the iframe and reset dashboard filter selections.
+- Optional dashboard native Select filters are omitted; host presets and range inputs are the primary controls.
+- Filtering computed Jalali dimensions cannot use database date indexes; host date bounds use `sale_date`.
+- Only PostgreSQL is implemented. Dataset editing and template processing should be limited to BI developers.
+
+## Testing and server deployment
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e 'packages/superset-jalali-sql[dev]'
+.venv/bin/python packages/superset-jalali-sql/scripts/generate_nowruz.py
+JALALI_TEST_DSN=postgresql://demo_reader:demo_reader@localhost:5440/demo .venv/bin/pytest packages/superset-jalali-sql/tests tests/test_host.py
+# After BOOTSTRAP_DONE:
+docker compose run --rm --no-deps superset-bootstrap python /app/scripts/smoke_embed.py
+```
+
+Integration tests compare every SQL calendar column against Python and verify no public functions or Jalali sales columns exist and `demo_reader` cannot create tables. Guest smoke tests compare monthly and map totals with read-only SQL, combine region/date rules, and check cache isolation across ranges.
+
+For remote browsers, set `.env` before starting:
+
+```dotenv
+SUPERSET_PUBLIC_URL=http://YOUR_SERVER:8088
+TILE_SERVER_PUBLIC_URL=http://YOUR_SERVER:8081
+```
+
+Also add the host origin to `CORS_OPTIONS` in `superset_config.py`. Ports 8090 (host), 8088 (Superset), and 8081 (tiles) bind on the server; PostgreSQL binds only to loopback. One Superset worker with four threads fits this shared server. The host health check uses its own port.
+
+This migration uses a new volume, `superset-demo_pgdata_jalali`, so the previous `superset-demo_pgdata` is preserved. A fresh checkout uses the new volume automatically. To regenerate this demo from scratch use `docker compose down -v && docker compose up --build -d` (this erases the active demo volume). Ordinary restarts preserve data.
+
+The server's missing Iran map was rebuilt from the Geofabrik OSM extract with Planetiler at max zoom 8 to fit this server. Tiles remain self-hosted; street-level detail needs a full-resolution build. The original README command can build the default zoom 14 map on a larger machine.
