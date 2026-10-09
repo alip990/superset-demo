@@ -3,24 +3,7 @@ CREATE DATABASE superset;
 CREATE DATABASE demo;
 \connect demo
 
--- Gregorian -> Jalali (Persian calendar) conversion, returns 'YYYY-MM-DD'
-CREATE OR REPLACE FUNCTION to_jalali(d date) RETURNS text LANGUAGE plpgsql IMMUTABLE AS $$
-DECLARE
-  gy int := extract(year from d); gm int := extract(month from d); gd int := extract(day from d);
-  g_d_m int[] := ARRAY[0,31,59,90,120,151,181,212,243,273,304,334];
-  gy2 int; days int; jy int; jm int; jd int;
-BEGIN
-  gy2 := CASE WHEN gm > 2 THEN gy + 1 ELSE gy END;
-  days := 355666 + (365 * gy) + ((gy2 + 3) / 4) - ((gy2 + 99) / 100) + ((gy2 + 399) / 400) + gd + g_d_m[gm];
-  jy := -1595 + (33 * (days / 12053));
-  days := days % 12053;
-  jy := jy + 4 * (days / 1461);
-  days := days % 1461;
-  IF days > 365 THEN jy := jy + ((days - 1) / 365); days := (days - 1) % 365; END IF;
-  IF days < 186 THEN jm := 1 + (days / 31); jd := 1 + (days % 31);
-  ELSE jm := 7 + ((days - 186) / 30); jd := 1 + ((days - 186) % 30); END IF;
-  RETURN lpad(jy::text,4,'0') || '-' || lpad(jm::text,2,'0') || '-' || lpad(jd::text,2,'0');
-END $$;
+SELECT setseed(0.42);
 
 CREATE TABLE provinces (
   id serial PRIMARY KEY, name_fa text, name_en text, region text, lat float8, lon float8
@@ -47,7 +30,6 @@ FROM provinces p CROSS JOIN generate_series(1, 6) g;
 CREATE TABLE sales (
   id bigserial PRIMARY KEY,
   sale_date date NOT NULL,
-  jalali_date text, jalali_month text, jalali_year int,
   branch_id int REFERENCES branches(id),
   branch_name text, province_fa text, province_en text, region text,
   lat float8, lon float8,
@@ -57,12 +39,9 @@ INSERT INTO sales (sale_date, branch_id, branch_name, province_fa, province_en, 
 SELECT d::date, b.id, b.name_fa, p.name_fa, p.name_en, p.region, b.lat, b.lon,
        (ARRAY['پوشاک','مواد غذایی','لوازم خانگی','دیجیتال','کتاب'])[1 + floor(random()*5)::int],
        round((random() * 90 + 10) * 100000), 1 + floor(random()*20)::int
-FROM generate_series(current_date - interval '540 days', current_date, interval '1 day') d
+FROM generate_series(DATE '2024-03-01', current_date, interval '1 day') d
 JOIN branches b ON true JOIN provinces p ON p.id = b.province_id
 WHERE random() < 0.35;
-UPDATE sales SET jalali_date = to_jalali(sale_date),
-                 jalali_month = substr(to_jalali(sale_date), 1, 7),
-                 jalali_year = substr(to_jalali(sale_date), 1, 4)::int;
 CREATE INDEX ON sales (sale_date); CREATE INDEX ON sales (region);
 
 -- Data-access mapping: which app user may see which region (used by RLS via Jinja)
