@@ -44,9 +44,10 @@ def index():
 
 @app.post("/login")
 def login():
-    if not request.is_json or request.json.get("user") not in APP_USERS:
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or body.get("user") not in APP_USERS:
         return jsonify(error="Unknown user"), 400
-    session["user"] = request.json["user"]
+    session["user"] = body["user"]
     return jsonify(ok=True)
 
 

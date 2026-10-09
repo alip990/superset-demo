@@ -16,3 +16,5 @@ Sources: [superset/connectors/sqla/utils.py](https://github.com/apache/superset/
 Pivot fields verified in tagged controlPanel.tsx and exercised through chart API and browser. Native Select filters are omitted; the host range picker is the primary date filter. Guest header: X-GuestToken (superset/config.py). SDK 0.3.0 and JalaliDatePicker 1.0.0 CDN assets fetched successfully. Picker input selector: input[data-jdp].
 
 Calendar generation pins jdatetime 6.1.0 and persiantools 4.0.0. Current persiantools 6.2.0 differs from jdatetime starting at 1503 due to future leap corrections. The committed anchors match both pinned libraries throughout 1350–1551; future astronomical accuracy is limited to this agreed calendar convention.
+
+Browser verification: all nine chart data requests succeeded. With manager and 1403/07/01–1403/07/30, the pivot displayed row 1403 and column 1403-07 مهر, the monthly chart displayed one bar, and recent rows were bounded to that month. The host uses embed_app_session to avoid collision with Superset session cookies across ports. Guest smoke SQL comparisons passed for monthly, map, region+date rules, and cache range isolation.

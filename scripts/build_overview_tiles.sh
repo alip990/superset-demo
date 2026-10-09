@@ -12,4 +12,5 @@ docker run --rm --memory=800m --memory-swap=800m -e JAVA_TOOL_OPTIONS=-Xmx512m \
   -v "$PWD/tiles:/data" ghcr.io/onthegomap/planetiler:latest \
   --osm-path=/data/iran-overview-compact.osm.pbf --output=/data/iran.mbtiles --download \
   --maxzoom=8 --threads=1 --nodemap-type=sparsearray --nodemap-storage=mmap \
-  --bounds=44,24,64,40 --languages=fa,en --compress-temp --force
+  --bounds=44,24,64,40 --languages=fa,en --compress-temp \
+  --free-water-polygons-after-read --free-natural-earth-after-read --free-lake-centerlines-after-read --force

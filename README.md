@@ -430,3 +430,5 @@ This migration uses a new volume, `superset-demo_pgdata_jalali`, so the previous
 Run `scripts/build_overview_tiles.sh` (requires `osmium-tool`) to reproduce the resource-limited map.
 
 The server's missing Iran map was rebuilt from the Geofabrik OSM extract with Planetiler using a filtered overview extract at max zoom 8 to fit this server. Tiles remain self-hosted; street-level detail needs a full-resolution build. The original README command can build the default zoom 14 map on a larger machine.
+
+Verified on the server: 13 unit/integration tests passed; bootstrap rerun completed; guest-token smoke passed; browser rendered all nine charts and the selected month in the pivot/recent table. Overview map tiles are served at port 8081. The host has a separate session cookie to preserve user/range across iframe loads.
