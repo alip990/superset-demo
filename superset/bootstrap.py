@@ -48,6 +48,9 @@ def dataset(name, sql=None):
         if sql:
             body["sql"] = sql
         ds = api("POST", "dataset/", json=body)["id"]
+    elif sql:
+        api("PUT", f"dataset/{ds}", json={"sql": sql})
+        api("PUT", f"dataset/{ds}/refresh")
     return ds
 
 
@@ -55,12 +58,16 @@ sales_ds = dataset("sales")
 branch_ds = dataset("sales_by_branch", sql="""
 SELECT branch_name, province_fa, region, lat, lon, SUM(amount) AS total_amount, COUNT(*) AS orders
 FROM sales GROUP BY 1,2,3,4,5""")
+jalali_ds = dataset("sales_jalali", sql="""
+SELECT s.*, {{ jalali_columns('s.sale_date') }}
+FROM sales s {{ jalali_join('s.sale_date') }}""")
 # metric on the sales dataset
-cols = api("GET", f"dataset/{sales_ds}")["result"]
-if not any(m["metric_name"] == "total_amount" for m in cols["metrics"]):
-    metrics = [{"id": m["id"], "metric_name": m["metric_name"], "expression": m["expression"]} for m in cols["metrics"]]
-    metrics.append({"metric_name": "total_amount", "verbose_name": "مجموع فروش", "expression": "SUM(amount)"})
-    api("PUT", f"dataset/{sales_ds}?override_columns=false", json={"metrics": metrics})
+for metric_ds in (sales_ds, jalali_ds):
+    cols = api("GET", f"dataset/{metric_ds}")["result"]
+    if not any(m["metric_name"] == "total_amount" for m in cols["metrics"]):
+        metrics = [{"id": m["id"], "metric_name": m["metric_name"], "expression": m["expression"]} for m in cols["metrics"]]
+        metrics.append({"metric_name": "total_amount", "verbose_name": "مجموع فروش", "expression": "SUM(amount)"})
+        api("PUT", f"dataset/{metric_ds}?override_columns=false", json={"metrics": metrics})
 
 SUM_AMOUNT = {"expressionType": "SQL", "sqlExpression": "SUM(amount)", "label": "مجموع فروش"}
 
@@ -85,17 +92,36 @@ charts = {
         "viewport": {"longitude": 53.7, "latitude": 32.4, "zoom": 4.4, "bearing": 0, "pitch": 0},
         "js_tooltip": "", "adhoc_filters": [],
     }),
-    "total": chart("مجموع فروش", "big_number_total", sales_ds, {"metric": SUM_AMOUNT, "adhoc_filters": [],
+    "total": chart("مجموع فروش", "big_number_total", jalali_ds, {"metric": SUM_AMOUNT, "adhoc_filters": [],
                                                               "y_axis_format": ",d"}),
-    "monthly": chart("فروش ماهانه (تقویم شمسی)", "echarts_timeseries_bar", sales_ds, {
-        "x_axis": "jalali_month", "metrics": [SUM_AMOUNT], "groupby": [], "adhoc_filters": [],
-        "row_limit": 1000, "order_desc": False, "x_axis_sort": "jalali_month", "x_axis_sort_asc": True,
+    "monthly": chart("فروش ماهانه (تقویم شمسی)", "echarts_timeseries_bar", jalali_ds, {
+        "x_axis": "jalali_month_label", "metrics": [SUM_AMOUNT], "groupby": [], "adhoc_filters": [],
+        "row_limit": 1000, "order_desc": False, "x_axis_sort": "jalali_month_label", "x_axis_sort_asc": True,
         "y_axis_format": "SMART_NUMBER", "show_legend": False,
     }),
-    "category": chart("سهم دسته‌بندی‌ها", "pie", sales_ds, {"groupby": ["category"], "metric": SUM_AMOUNT,
+    "daily": chart("فروش روزانه (شمسی)", "echarts_timeseries_line", jalali_ds, {
+        "x_axis": "jalali_date", "metrics": [SUM_AMOUNT], "groupby": [], "adhoc_filters": [],
+        "row_limit": 10000, "x_axis_sort": "jalali_date", "x_axis_sort_asc": True, "show_legend": False,
+    }),
+    "season": chart("فروش فصلی", "echarts_timeseries_bar", jalali_ds, {
+        "x_axis": "jalali_season_key", "metrics": [SUM_AMOUNT], "groupby": ["category"],
+        "stack": True, "adhoc_filters": [], "row_limit": 1000,
+        "x_axis_sort": "jalali_season_key", "x_axis_sort_asc": True,
+    }),
+    "pivot": chart("فروش سال و ماه", "pivot_table_v2", jalali_ds, {
+        "groupbyRows": ["jalali_year"], "groupbyColumns": ["jalali_month_label"],
+        "metrics": [SUM_AMOUNT], "aggregateFunction": "Sum", "adhoc_filters": [],
+        "row_limit": 10000, "rowOrder": "key_a_to_z", "colOrder": "key_a_to_z", "valueFormat": "SMART_NUMBER",
+    }),
+    "recent": chart("آخرین فروش‌ها", "table", jalali_ds, {
+        "query_mode": "raw", "all_columns": ["jalali_date", "branch_name", "category", "amount"],
+        "order_by_cols": [json.dumps(["jalali_date_int", False])], "adhoc_filters": [],
+        "row_limit": 100, "server_pagination": False,
+    }),
+    "category": chart("سهم دسته‌بندی‌ها", "pie", jalali_ds, {"groupby": ["category"], "metric": SUM_AMOUNT,
                                                             "adhoc_filters": [], "row_limit": 100, "show_labels": True,
                                                             "label_type": "key_percent", "donut": True}),
-    "province": chart("فروش به تفکیک استان", "table", sales_ds, {
+    "province": chart("فروش به تفکیک استان", "table", jalali_ds, {
         "query_mode": "aggregate", "groupby": ["province_fa", "region"], "metrics": [SUM_AMOUNT],
         "all_columns": [], "adhoc_filters": [], "row_limit": 100, "order_desc": True, "server_pagination": False,
     }),
@@ -106,9 +132,9 @@ def chart_node(key, width, height):
     return {"type": "CHART", "id": f"CHART-{key}", "children": [],
             "meta": {"chartId": charts[key], "width": width, "height": height}}
 
-rows = [["total", "category"], ["map", "monthly"], ["province"]]
-widths = {"total": 4, "category": 8, "map": 6, "monthly": 6, "province": 12}
-heights = {"total": 40, "category": 40, "map": 80, "monthly": 80, "province": 60}
+rows = [["total", "category"], ["monthly", "daily"], ["map", "season"], ["pivot"], ["recent", "province"]]
+widths = {"total": 4, "category": 8, "map": 6, "monthly": 6, "province": 6, "daily": 6, "season": 6, "pivot": 12, "recent": 6}
+heights = {"total": 40, "category": 40, "map": 80, "monthly": 80, "province": 60, "daily": 80, "season": 80, "pivot": 60, "recent": 60}
 pos = {"DASHBOARD_VERSION_KEY": "v2", "ROOT_ID": {"type": "ROOT", "id": "ROOT_ID", "children": ["GRID_ID"]},
        "GRID_ID": {"type": "GRID", "id": "GRID_ID", "children": [], "parents": ["ROOT_ID"]},
        "HEADER_ID": {"type": "HEADER", "id": "HEADER_ID", "meta": {"text": "داشبورد فروش"}}}
@@ -167,7 +193,7 @@ with app.app_context():
         if not u:
             sm.add_user(uname, first, "Demo", f"{uname}@example.com", [viewer, regional], password=uname)
 
-    tables = db.session.query(SqlaTable).filter(SqlaTable.table_name.in_(["sales", "sales_by_branch"])).all()
+    tables = db.session.query(SqlaTable).filter(SqlaTable.table_name.in_(["sales", "sales_by_branch", "sales_jalali"])).all()
     rls = db.session.query(RowLevelSecurityFilter).filter_by(name="region-by-current-user").one_or_none()
     if not rls:
         rls = RowLevelSecurityFilter(name="region-by-current-user")
