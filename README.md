@@ -362,6 +362,8 @@ This is a **demo**. It uses default credentials, a static JWT secret, CORS/ifram
 
 The package has no runtime dependencies. Python and PostgreSQL use the same committed Nowruz table for years 1350–1550. The generator cross-checks jdatetime 6.1.0 and persiantools 4.0.0; newer persiantools 6.2.0 has different future leap corrections from year 1503. See [verified facts](docs/VERIFIED_FACTS.md) for source checks and the supported calendar convention.
 
+The embedded SDK, Jalali date picker, and Vazirmatn font are vendored under `embed-app/static` from the verified pinned CDN releases so browser startup does not require external assets.
+
 The host accepts Latin, Persian and Arabic digits in `YYYY/MM/DD` or `YYYY-MM-DD`. It validates both dates, shows inclusive dates, and sends Gregorian half-open bounds on `sale_date`. Presets use Asia/Tehran and Saturday week starts. Use the **مهر ۱۴۰۳** preset to verify one monthly bar, `1403-07 مهر`; switch to `ali_north` and the total drops. Clearing the date filter restores all dates. Global region RLS still applies.
 
 ## Writing Jalali datasets
@@ -425,4 +427,6 @@ Also add the host origin to `CORS_OPTIONS` in `superset_config.py`. Ports 8090 (
 
 This migration uses a new volume, `superset-demo_pgdata_jalali`, so the previous `superset-demo_pgdata` is preserved. A fresh checkout uses the new volume automatically. To regenerate this demo from scratch use `docker compose down -v && docker compose up --build -d` (this erases the active demo volume). Ordinary restarts preserve data.
 
-The server's missing Iran map was rebuilt from the Geofabrik OSM extract with Planetiler at max zoom 8 to fit this server. Tiles remain self-hosted; street-level detail needs a full-resolution build. The original README command can build the default zoom 14 map on a larger machine.
+Run `scripts/build_overview_tiles.sh` (requires `osmium-tool`) to reproduce the resource-limited map.
+
+The server's missing Iran map was rebuilt from the Geofabrik OSM extract with Planetiler using a filtered overview extract at max zoom 8 to fit this server. Tiles remain self-hosted; street-level detail needs a full-resolution build. The original README command can build the default zoom 14 map on a larger machine.

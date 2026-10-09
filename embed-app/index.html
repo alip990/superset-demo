@@ -2,9 +2,10 @@
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="utf-8"><title>اپلیکیشن میزبان — داشبورد تعبیه‌شده</title>
-  <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@majidh1/jalalidatepicker@1.0.0/dist/jalalidatepicker.min.css">
+
+  <link rel="stylesheet" href="/static/jalalidatepicker-1.0.0.css">
   <style>
+    @font-face { font-family:Vazirmatn; src:url(/static/Vazirmatn-Regular.woff2) format("woff2"); font-display:swap; }
     body { font-family: Vazirmatn, Tahoma, sans-serif; margin: 0; background: #f4f5f7; }
     header { background: #1f2a44; color: #fff; padding: 12px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
     select { font: inherit; padding: 4px 8px; }
@@ -35,8 +36,8 @@
 </header>
 <div id="loading" hidden>در حال بارگذاری داشبورد…</div>
 <div id="dashboard"></div>
-<script src="https://cdn.jsdelivr.net/npm/@superset-ui/embedded-sdk@0.3.0/bundle/index.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@majidh1/jalalidatepicker@1.0.0/dist/jalalidatepicker.min.js"></script>
+<script src="/static/embedded-sdk-0.3.0.js"></script>
+<script src="/static/jalalidatepicker-1.0.0.js"></script>
 <script>
   const el = id => document.getElementById(id);
   async function api(path, body) {
@@ -69,14 +70,19 @@
     } catch (error) { el('error').textContent=error.message; }
     finally { el('loading').hidden=true; }
   }
-  async function applyRange(body) {
-    try { await api('/range', body); await mount(); }
-    catch (error) { el('error').textContent=error.message; }
+  let actionQueue = Promise.resolve();
+  function change(path, body) {
+    actionQueue = actionQueue.then(async () => {
+      const controls = [...document.querySelectorAll('header button, header input, header select')];
+      controls.forEach(control => {control.disabled=true;});
+      try { await api(path, body); await mount(); }
+      catch (error) { el('error').textContent=error.message; }
+      finally { controls.forEach(control => {control.disabled=false;}); }
+    });
+    return actionQueue;
   }
-  el('user').onchange = async e => {
-    try { await api('/login', {user:e.target.value}); await mount(); }
-    catch (error) { el('error').textContent=error.message; }
-  };
+  function applyRange(body) { return change('/range', body); }
+  el('user').onchange = e => change('/login', {user:e.target.value});
   el('apply').onclick = () => applyRange({from:el('from').value,to:el('to').value});
   el('clear').onclick = () => { el('from').value=''; el('to').value=''; applyRange({}); };
   api('/jalali/presets').then(items => {
@@ -88,7 +94,7 @@
     }
   }).catch(error => {el('error').textContent=error.message;});
   if (window.jalaliDatepicker) jalaliDatepicker.startWatch();
-  mount();
+  actionQueue = mount();
 </script>
 </body>
 </html>

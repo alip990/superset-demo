@@ -73,6 +73,7 @@ services:
     ports: ["8090:8090"]
     depends_on:
       superset: {condition: service_healthy}
+      superset-bootstrap: {condition: service_completed_successfully}
 
 volumes:
   pgdata_jalali:

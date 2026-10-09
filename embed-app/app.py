@@ -20,14 +20,16 @@ APP_USERS = {
 
 app = Flask(__name__, template_folder=".")
 app.secret_key = "host-app-demo"
+# Cookies are shared across ports; keep the host session distinct from Superset.
+app.config["SESSION_COOKIE_NAME"] = "embed_app_session"
 
 
 def superset_session():
     s = requests.Session()
     tok = s.post(f"{SUPERSET}/api/v1/security/login",
-                 json={"username": "admin", "password": "admin", "provider": "db"}).json()["access_token"]
+                 json={"username": "admin", "password": "admin", "provider": "db"}, timeout=30).json()["access_token"]
     s.headers["Authorization"] = f"Bearer {tok}"
-    s.headers["X-CSRFToken"] = s.get(f"{SUPERSET}/api/v1/security/csrf_token/").json()["result"]
+    s.headers["X-CSRFToken"] = s.get(f"{SUPERSET}/api/v1/security/csrf_token/", timeout=30).json()["result"]
     s.headers["Referer"] = SUPERSET
     return s
 
@@ -35,7 +37,7 @@ def superset_session():
 @app.get("/")
 def index():
     s = superset_session()
-    uuid = s.get(f"{SUPERSET}/api/v1/dashboard/sales-fa/embedded").json()["result"]["uuid"]
+    uuid = s.get(f"{SUPERSET}/api/v1/dashboard/sales-fa/embedded", timeout=30).json()["result"]["uuid"]
     return render_template("index.html", users=APP_USERS, current=session.get("user", "ali_north"),
                            dashboard_uuid=uuid, superset_url=SUPERSET_PUBLIC)
 
@@ -120,7 +122,7 @@ def guest_token():
     uname = session.get("user", "ali_north")
     user = APP_USERS[uname]
     s = superset_session()
-    uuid = s.get(f"{SUPERSET}/api/v1/dashboard/sales-fa/embedded").json()["result"]["uuid"]
+    uuid = s.get(f"{SUPERSET}/api/v1/dashboard/sales-fa/embedded", timeout=30).json()["result"]["uuid"]
     rls = []
     if user["regions"] is not None:
         regions = ", ".join("'%s'" % r.replace("'", "''") for r in user["regions"])
@@ -131,7 +133,7 @@ def guest_token():
                     "clause": f"sale_date >= DATE '{selected['from']}' AND sale_date < DATE '{selected['end_exclusive']}'"})
     body = {"user": {"username": uname, "first_name": user["name"], "last_name": ""},
             "resources": [{"type": "dashboard", "id": uuid}], "rls": rls}
-    r = s.post(f"{SUPERSET}/api/v1/security/guest_token/", json=body)
+    r = s.post(f"{SUPERSET}/api/v1/security/guest_token/", json=body, timeout=30)
     r.raise_for_status()
     return jsonify(token=r.json()["token"], rls=rls, range=session.get("range"), range_gregorian=selected)
 
