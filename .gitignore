@@ -4,3 +4,10 @@ tiles/data/
 *.log
 .env
 __pycache__/
+.venv/
+.pytest_cache/
+*.egg-info/
+tiles/*.pbf
+tiles/sources/
+tiles/tmp/
+tiles/*.gz

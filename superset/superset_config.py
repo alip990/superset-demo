@@ -41,7 +41,7 @@ GUEST_TOKEN_JWT_SECRET = os.environ.get("GUEST_TOKEN_JWT_SECRET", "demo-guest-to
 GUEST_TOKEN_JWT_EXP_SECONDS = 600
 ENABLE_CORS = True
 CORS_OPTIONS = {"supports_credentials": True, "allow_headers": ["*"], "resources": ["*"],
-                "origins": ["http://localhost:8090"]}
+                "origins": ["http://localhost:8090", "http://168.119.186.100:8090"]}
 # demo only: no CSP so iframe + external tile server work; set a real CSP in production
 TALISMAN_ENABLED = False
 HTTP_HEADERS = {"X-Frame-Options": "ALLOWALL"}
@@ -49,3 +49,7 @@ SESSION_COOKIE_SAMESITE = "Lax"
 WTF_CSRF_ENABLED = True
 
 FAB_ADD_SECURITY_API = True  # /api/v1/security/roles, users ... for automation
+
+from superset_jalali_sql import JINJA_ADDONS
+JINJA_CONTEXT_ADDONS = dict(JINJA_ADDONS)
+JALALI_SQL = {"dialect": "postgresql", "digits": "latin"}
