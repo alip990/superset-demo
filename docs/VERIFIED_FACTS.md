@@ -18,3 +18,5 @@ Pivot fields verified in tagged controlPanel.tsx and exercised through chart API
 Calendar generation pins jdatetime 6.1.0 and persiantools 4.0.0. Current persiantools 6.2.0 differs from jdatetime starting at 1503 due to future leap corrections. The committed anchors match both pinned libraries throughout 1350–1551; future astronomical accuracy is limited to this agreed calendar convention.
 
 Browser verification: all nine chart data requests succeeded. With manager and 1403/07/01–1403/07/30, the pivot displayed row 1403 and column 1403-07 مهر, the monthly chart displayed one bar, and recent rows were bounded to that month. The host uses embed_app_session to avoid collision with Superset session cookies across ports. Guest smoke SQL comparisons passed for monthly, map, region+date rules, and cache range isolation.
+
+Self-hosted map browser verification: 20 raster tile requests returned HTTP 200; the basemap and branch points rendered in the iframe without chart error alerts. All services with health checks are healthy. PostgreSQL integration additionally verified Persian digits preserve numeric/date values and NULL dates produce entirely NULL Jalali outputs.

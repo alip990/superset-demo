@@ -23,3 +23,15 @@ def test_all_sql_columns():
         c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='sales' AND column_name LIKE 'jalali_%'")
         assert c.fetchall() == []
         with pytest.raises(psycopg2.errors.InsufficientPrivilege): c.execute('CREATE TABLE public.should_not_exist(id int)')
+
+@pytest.mark.integration
+def test_persian_digits_and_null_dates():
+    if not os.environ.get('JALALI_TEST_DSN'): pytest.skip('Set JALALI_TEST_DSN to run integration tests')
+    with psycopg2.connect(os.environ['JALALI_TEST_DSN']) as db, db.cursor() as c:
+        c.execute(f"SELECT {jalali_columns('d',prefix='latin_')}, {jalali_columns('d',prefix='persian_',digits='persian')} FROM (VALUES (DATE '2024-10-09'), (NULL::date)) AS dates(d) {jalali_join('d')} ORDER BY d NULLS LAST")
+        latin_and_persian, nulls = c.fetchall()
+        latin, persian = latin_and_persian[:13], latin_and_persian[13:]
+        translate=str.maketrans('0123456789','۰۱۲۳۴۵۶۷۸۹')
+        assert persian == tuple(x.translate(translate) if isinstance(x,str) else x for x in latin)
+        assert persian[3] == '۱۴۰۳/۰۷/۱۸'
+        assert all(x is None for x in nulls)
