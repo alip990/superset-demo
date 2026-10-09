@@ -3,12 +3,19 @@
 <head>
   <meta charset="utf-8"><title>اپلیکیشن میزبان — داشبورد تعبیه‌شده</title>
   <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@majidh1/jalalidatepicker@1.0.0/dist/jalalidatepicker.min.css">
   <style>
     body { font-family: Vazirmatn, Tahoma, sans-serif; margin: 0; background: #f4f5f7; }
     header { background: #1f2a44; color: #fff; padding: 12px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
     select { font: inherit; padding: 4px 8px; }
     code { background: #0002; padding: 2px 6px; border-radius: 4px; direction: ltr; display: inline-block; }
-    #dashboard { height: calc(100vh - 60px); }
+    #dashboard { height: calc(100vh - 190px); min-height: 700px; }
+    input, button { font: inherit; padding: 6px 10px; border-radius: 5px; border: 1px solid #bbb; }
+    input { width: 125px; direction: ltr; }
+    button { cursor: pointer; }
+    #presets { display:flex; gap:6px; flex-wrap:wrap; }
+    #loading { position:fixed; bottom:24px; left:24px; padding:16px; background:#1f2a44; color:white; border-radius:8px; z-index:99; }
+    #error { color:#ffb4b4; }
     #dashboard iframe { width: 100%; height: 100%; border: 0; }
   </style>
 </head>
@@ -21,29 +28,66 @@
     </select>
   </label>
   <span>فیلتر اجباری (RLS در Guest Token): <code id="rls">…</code></span>
+  <label>از <input id="from" data-jdp placeholder="1403/07/01" aria-label="از تاریخ شمسی"></label>
+  <label>تا <input id="to" data-jdp placeholder="1403/07/30" aria-label="تا تاریخ شمسی"></label>
+  <button id="apply">اعمال</button><button id="clear">حذف فیلتر تاریخ</button>
+  <div id="presets"></div><span id="active"></span><span id="error" role="alert"></span>
 </header>
+<div id="loading" hidden>در حال بارگذاری داشبورد…</div>
 <div id="dashboard"></div>
-<script src="https://cdn.jsdelivr.net/npm/@superset-ui/embedded-sdk@0.2.0/bundle/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@superset-ui/embedded-sdk@0.3.0/bundle/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@majidh1/jalalidatepicker@1.0.0/dist/jalalidatepicker.min.js"></script>
 <script>
+  const el = id => document.getElementById(id);
+  async function api(path, body) {
+    const r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'خطا در بارگذاری');
+    return j;
+  }
   async function fetchGuestToken() {
-    const r = await fetch('/guest-token'); const j = await r.json();
-    document.getElementById('rls').textContent = j.rls.length ? j.rls[0].clause : 'بدون محدودیت';
+    const j = await api('/guest-token');
+    el('rls').textContent = j.rls.map(rule => rule.clause).join(' AND ') || 'بدون محدودیت';
+    el('active').textContent = j.range ? `${j.range.from} — ${j.range.to} (${j.range_gregorian.from} — ${j.range_gregorian.to})` : 'همه تاریخ‌ها';
+    if (j.range) { el('from').value = j.range.from; el('to').value = j.range.to; }
     return j.token;
   }
-  function mount() {
-    document.getElementById('dashboard').innerHTML = '';
-    supersetEmbeddedSdk.embedDashboard({
-      id: "{{ dashboard_uuid }}",
-      supersetDomain: "{{ superset_url }}",
-      mountPoint: document.getElementById('dashboard'),
-      fetchGuestToken,
-      dashboardUiConfig: { hideTitle: false, filters: { expanded: false } },
-    });
+  let embedded;
+  async function mount() {
+    el('loading').hidden = false; el('error').textContent = '';
+    try {
+      if (embedded) embedded.unmount();
+      el('dashboard').innerHTML = '';
+      embedded = await supersetEmbeddedSdk.embedDashboard({
+        id: {{ dashboard_uuid | tojson }},
+        supersetDomain: {{ superset_url | tojson }},
+        mountPoint: el('dashboard'), fetchGuestToken,
+        dashboardUiConfig: {hideTitle:false, filters:{expanded:false}},
+      });
+      const frame = el('dashboard').querySelector('iframe');
+      if (frame) frame.addEventListener('load', () => {el('loading').hidden=true;}, {once:true});
+    } catch (error) { el('error').textContent=error.message; }
+    finally { el('loading').hidden=true; }
   }
-  document.getElementById('user').onchange = async (e) => {
-    await fetch('/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({user: e.target.value})});
-    mount();
+  async function applyRange(body) {
+    try { await api('/range', body); await mount(); }
+    catch (error) { el('error').textContent=error.message; }
+  }
+  el('user').onchange = async e => {
+    try { await api('/login', {user:e.target.value}); await mount(); }
+    catch (error) { el('error').textContent=error.message; }
   };
+  el('apply').onclick = () => applyRange({from:el('from').value,to:el('to').value});
+  el('clear').onclick = () => { el('from').value=''; el('to').value=''; applyRange({}); };
+  api('/jalali/presets').then(items => {
+    items.push({label:'مهر ۱۴۰۳',from:'1403/07/01',to:'1403/07/30'});
+    for (const item of items) {
+      const button=document.createElement('button'); button.textContent=item.label;
+      button.onclick=() => {el('from').value=item.from;el('to').value=item.to;applyRange({from:item.from,to:item.to});};
+      el('presets').appendChild(button);
+    }
+  }).catch(error => {el('error').textContent=error.message;});
+  if (window.jalaliDatepicker) jalaliDatepicker.startWatch();
   mount();
 </script>
 </body>
