@@ -1,5 +1,8 @@
 # Large generated map tiles (build locally, see README)
 tiles/*.mbtiles
+# Database backups (large, contain real data and credential hashes)
+backups/*.sql
+!backups/02-bi.sql
 tiles/data/
 *.log
 .env

@@ -12,3 +12,4 @@ jobs:
       - run: python packages/superset-jalali-sql/scripts/generate_nowruz.py
       - run: git diff --exit-code packages/superset-jalali-sql/src/superset_jalali_sql/nowruz.py
       - run: pytest packages/superset-jalali-sql/tests tests/test_host.py
+      - run: '! grep -RIn --exclude-dir=__pycache__ -e sale_date -e superset_jalali_sql embed-app'

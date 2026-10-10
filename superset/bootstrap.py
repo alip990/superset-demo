@@ -127,6 +127,34 @@ charts = {
     }),
 }
 
+# Native filters. Ids stay stable so a re-run updates these rows instead of adding duplicates.
+# Scope excludes the map: sales_by_branch has no Jalali columns.
+SELECT_CONTROLS = {"multiSelect": True, "sortAscending": True, "searchAllOptions": False,
+                   "inverseSelection": False, "defaultToFirstItem": False}
+
+
+def native_filter(fid, name, ftype, column, extra_controls=None, parents=()):
+    return {
+        "id": fid, "name": name, "filterType": ftype, "type": "NATIVE_FILTER",
+        "targets": [{"datasetId": jalali_ds, "column": {"name": column}}],
+        "controlValues": {"enableEmptyFilter": False, **(extra_controls or {})},
+        "defaultDataMask": {"extraFormData": {}, "filterState": {}, "ownState": {}},
+        "cascadeParentIds": list(parents),
+        "scope": {"rootPath": ["ROOT_ID"], "excluded": [charts["map"]]},
+        "description": "",
+    }
+
+
+YEAR_FILTER = "NATIVE_FILTER-jalali_year"
+native_filters = [
+    native_filter(YEAR_FILTER, "سال", "filter_select", "jalali_year", SELECT_CONTROLS),
+    native_filter("NATIVE_FILTER-jalali_month", "ماه", "filter_select", "jalali_month_label",
+                  SELECT_CONTROLS, parents=(YEAR_FILTER,)),
+    native_filter("NATIVE_FILTER-jalali_season", "فصل", "filter_select", "jalali_season_key", SELECT_CONTROLS),
+    native_filter("NATIVE_FILTER-jalali_range", "بازه تاریخ (شمسی)", "filter_range", "jalali_date_int"),
+    native_filter("NATIVE_FILTER-category", "دسته‌بندی", "filter_select", "category", SELECT_CONTROLS),
+]
+
 # ---------- dashboard layout ----------
 def chart_node(key, width, height):
     return {"type": "CHART", "id": f"CHART-{key}", "children": [],
@@ -150,7 +178,8 @@ for i, row in enumerate(rows):
         pos[node["id"]] = node
 
 dash_body = {"dashboard_title": "داشبورد فروش", "slug": "sales-fa", "published": True,
-             "position_json": json.dumps(pos), "json_metadata": json.dumps({"refresh_frequency": 0})}
+             "position_json": json.dumps(pos),
+             "json_metadata": json.dumps({"refresh_frequency": 0, "native_filter_configuration": native_filters})}
 dash_id = find("dashboard", "slug", "sales-fa")
 if dash_id:
     api("PUT", f"dashboard/{dash_id}", json=dash_body)

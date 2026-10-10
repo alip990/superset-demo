@@ -6,6 +6,7 @@ x-superset: &superset
   environment:
     SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
     TILE_SERVER_PUBLIC_URL: ${TILE_SERVER_PUBLIC_URL:-http://localhost:8081}
+    HOST_APP_ORIGINS: ${HOST_APP_ORIGINS:-http://localhost:8090}
   volumes:
     - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
     - ./superset/bootstrap.py:/app/bootstrap.py:ro
@@ -22,6 +23,18 @@ services:
       - pgdata_jalali:/var/lib/postgresql/data
     ports: ["127.0.0.1:5440:5432"]
     healthcheck: {test: ["CMD", "pg_isready", "-U", "postgres"], interval: 5s, retries: 20}
+
+  # Restored 1 May beta backup (Postgres 14). Company tree and traffic facts live in schema bi.
+  backup-db:
+    image: postgres:14
+    environment: {POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres}
+    volumes:
+      - ./backups:/backups:ro
+      - ./backups/restore.sh:/docker-entrypoint-initdb.d/01-restore.sh:ro
+      - ./backups/02-bi.sql:/docker-entrypoint-initdb.d/02-bi.sql:ro
+      - backupdata:/var/lib/postgresql/data
+    ports: ["127.0.0.1:5441:5432"]
+    healthcheck: {test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], interval: 10s, retries: 120}
 
   redis:
     image: redis:7-alpine
@@ -45,14 +58,21 @@ services:
   # creates DB connection, datasets, charts, dashboards, roles, users, RLS, embedding
   superset-bootstrap:
     <<: *superset
-    command: python /app/bootstrap.py
+    command: bash -c "python /app/bootstrap.py && python /app/bootstrap_traffic.py"
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
       - ./superset/bootstrap.py:/app/bootstrap.py:ro
+      - ./superset/bootstrap_traffic.py:/app/bootstrap_traffic.py:ro
       - ./scripts:/app/scripts:ro
-    environment: {SUPERSET_URL: http://superset:8088, TILE_SERVER_PUBLIC_URL: "${TILE_SERVER_PUBLIC_URL:-http://localhost:8081}"}
+    environment:
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_URL: http://superset:8088
+      TILE_SERVER_PUBLIC_URL: ${TILE_SERVER_PUBLIC_URL:-http://localhost:8081}
+      HOST_APP_ORIGINS: ${HOST_APP_ORIGINS:-http://localhost:8090}
+      MAP_TILE_URL: "${MAP_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}"
     depends_on:
       superset: {condition: service_healthy}
+      backup-db: {condition: service_healthy}
 
   # our own map server: vector tiles built from OSM (Iran extract) via planetiler
   tileserver:
@@ -68,13 +88,19 @@ services:
     command: python /srv/app.py
     working_dir: /srv
     volumes: ["./embed-app:/srv:ro"]
-    environment: {SUPERSET_URL: http://superset:8088, SUPERSET_PUBLIC_URL: "${SUPERSET_PUBLIC_URL:-http://localhost:8088}"}
+    environment:
+      SUPERSET_URL: http://superset:8088
+      SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://localhost:8088}
+      EMBED_DASHBOARD_SLUG: ${EMBED_DASHBOARD_SLUG:-traffic-fa-embedded}
+      COMPANY_DB_URL: postgresql://bi_reader:bi_reader@backup-db:5432/CrimeManagementDb
     restart: unless-stopped
-    healthcheck: {test: ["CMD", "curl", "-f", "http://localhost:8090/jalali/presets"], interval: 30s, timeout: 10s, retries: 3}
+    healthcheck: {test: ["CMD", "curl", "-f", "http://localhost:8090/healthz"], interval: 30s, timeout: 10s, retries: 3}
     ports: ["8090:8090"]
     depends_on:
       superset: {condition: service_healthy}
       superset-bootstrap: {condition: service_completed_successfully}
+      backup-db: {condition: service_healthy}
 
 volumes:
   pgdata_jalali:
+  backupdata:

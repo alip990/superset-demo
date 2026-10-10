@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>سازوکار تقویم جلالی</title>
+  <style>
+    @font-face {
+      font-family: Vazirmatn;
+      src: url("../embed-app/static/Vazirmatn-Regular.woff2") format("woff2");
+      font-weight: 400;
+      font-display: swap;
+    }
+    :root {
+      --ink: #1a2332;
+      --muted: #4d5968;
+      --paper: #eef2f4;
+      --sheet: #fbfcfd;
+      --tile: #0e6b62;
+      --gold: #a6843d;
+      --line: #d5dde3;
+      --code: #15202b;
+    }
+    * { box-sizing: border-box; }
+    html { direction: rtl; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Vazirmatn, Tahoma, sans-serif;
+      font-size: 1.125rem;
+      line-height: 1.9;
+      text-align: right;
+    }
+    main {
+      width: min(42rem, calc(100% - 2rem));
+      margin: 2.5rem auto 4rem;
+    }
+    header.year {
+      border-bottom: 1px solid var(--gold);
+      padding-bottom: 1.25rem;
+      margin-bottom: 1.75rem;
+    }
+    h1 {
+      font-size: 1.85rem;
+      font-weight: 400;
+      line-height: 1.45;
+      margin: 0 0 0.75rem;
+    }
+    h2 {
+      font-size: 1.35rem;
+      font-weight: 400;
+      margin: 2.4rem 0 0.6rem;
+      color: var(--tile);
+    }
+    h3 {
+      font-size: 1.12rem;
+      font-weight: 400;
+      margin: 1.6rem 0 0.4rem;
+    }
+    p { margin: 0.7rem 0; }
+    a { color: var(--tile); }
+    ul, ol { margin: 0.4rem 0 0.8rem; padding: 0 1.3rem 0 0; }
+    li { margin: 0.25rem 0; }
+    code, .ltr {
+      direction: ltr;
+      unicode-bidi: isolate;
+      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+      font-size: 0.92em;
+    }
+    p code, li code, td code {
+      background: #e6eef0;
+      padding: 0.05em 0.35em;
+      border-radius: 3px;
+    }
+    pre {
+      direction: ltr;
+      text-align: left;
+      background: var(--code);
+      color: #e7eef2;
+      padding: 0.9rem 1rem;
+      overflow-x: auto;
+      border-radius: 6px;
+      line-height: 1.55;
+    }
+    pre code { background: transparent; color: inherit; padding: 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.8rem 0 1.2rem;
+      font-size: 1rem;
+      background: var(--sheet);
+    }
+    th, td {
+      text-align: right;
+      padding: 0.45rem 0.7rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 400;
+    }
+    td code { white-space: nowrap; }
+    .lead { color: var(--muted); }
+  </style>
+</head>
+<body>
+<main>
+  <header class="year">
+    <h1>سازوکار تقویم جلالی در این پروژه</h1>
+    <p class="lead">تاریخ در پایگاه داده میلادی می‌ماند. روز، ماه و سال شمسی هنگام اجرای کوئری ساخته می‌شوند و به‌صورت ستون ذخیره نمی‌شوند. این متن دو مسیر موجود در همین مخزن را شرح می‌دهد: داشبورد فروش، و داشبورد ترافیک.</p>
+  </header>
+
+  <h2>داشبورد فروش: تبدیل داخل کوئری</h2>
+  <p>مسیر فروش بستهٔ <code>packages/superset-jalali-sql</code> است. این بسته هیچ افزونه‌ای روی PostgreSQL نصب نمی‌کند و هیچ تابع یا جدول تقویمی در پایگاه <code>demo</code> نمی‌سازد. سوپرست فقط یک دیتاست مجازی به نام <code>sales_jalali</code> دارد که SQL آن هنوز قالب Jinja است:</p>
+  <pre><code>SELECT s.*, {{ jalali_columns('s.sale_date') }}
+FROM sales s
+{{ jalali_join('s.sale_date') }}</code></pre>
+  <p>موقع خواندن ستون‌های دیتاست، سوپرست این قالب را با توابعی که در <code>JINJA_CONTEXT_ADDONS</code> ثبت شده‌اند پر می‌کند. خروجی، یک <code>SELECT</code> معمولی PostgreSQL است. جدول <code>sales</code> همچنان فقط <code>sale_date</code> میلادی دارد.</p>
+  <p>پیکربندی در <code>superset/superset_config.py</code> این محدوده را برای دمو روی سال‌های ۱۳۹۰ تا ۱۴۲۰ گذاشته است. نتیجهٔ تاریخ‌های داخل همین بازه با جدول کامل ۱۳۵۰ تا ۱۵۵۰ یکی است. فهرست کوتاه‌تر، JOIN تقویم را سبک‌تر می‌کند.</p>
+  <pre><code>JALALI_SQL = {"dialect": "postgresql", "digits": "latin", "min_year": 1390, "max_year": 1420}</code></pre>
+
+  <h3>جدول نوروز، مبدأ هر سال</h3>
+  <p>هر سال جلالی از لحظهٔ نوروز شروع می‌شود و تا نوروز سال بعد ادامه دارد. فایل <code>nowruz.py</code> برای هر سال از ۱۳۵۰ تا ۱۵۵۰، تاریخ میلادی همان نوروز را نگه می‌دارد. مثلاً نوروز ۱۴۰۳ برابر است با <code>2024-03-20</code>. این جدول یک‌بار با اسکریپت <code>generate_nowruz.py</code> ساخته شده و هم کد پایتون و هم SQL تولیدشده از همان دیکشنری استفاده می‌کنند.</p>
+  <p>نسخه‌های سنجاق‌شده برای ساخت جدول، jdatetime برابر ۶٫۱٫۰ و persiantools برابر ۴٫۰٫۰ هستند. persiantools جدیدتر از سال ۱۵۰۳ به‌خاطر اصلاح کبیسهٔ آینده با jdatetime فرق دارد. جدول داخل مخزن قرارداد مشترک همان دو نسخهٔ سنجاق‌شده است.</p>
+
+  <h3>شش ماه ۳۱روزه، پنج ماه ۳۰روزه، اسفند تا نوروز بعد</h3>
+  <p>شمارش روز از نوروز این‌طور است:</p>
+  <ul>
+    <li>شش ماه اول، هر کدام ۳۱ روز. جمع این بخش ۱۸۶ روز است.</li>
+    <li>پنج ماه بعد (مهر تا بهمن)، هر کدام ۳۰ روز.</li>
+    <li>طول اسفند از تفاضل دو نوروز پیاپی به دست می‌آید: تعداد روزهای سال منهای ۳۳۶. اگر این عدد ۲۹ باشد سال عادی است و اگر ۳۰ باشد سال کبیسه است.</li>
+  </ul>
+  <p>مثال: ۱ مهر ۱۴۰۳. از ابتدای سال ۱۸۶ روز (تا پایان شهریور) گذشته، پس روز اول مهر، روز شمارهٔ ۱۸۶ از صفر است. نوروز ۱۴۰۳ به‌اضافهٔ ۱۸۶ روز می‌شود ۲۲ سپتامبر ۲۰۲۴، یعنی <code>2024-09-22</code>. ۳۰ مهر ۱۴۰۳ هم آخرین روز پیش از ۱ آبان است و نیمهٔ باز میلادی‌اش تا پیش از <code>2024-10-22</code> می‌رود.</p>
+  <p>همان حساب در پایتون با <code>g2j</code> و <code>j2g</code> است. <code>g2j</code> با جست‌وجوی دودویی، آخرین نوروزی را پیدا می‌کند که از تاریخ میلادی بزرگ‌تر نباشد. اختلاف روز با آن نوروز، ماه و روز را با فرمول بالا می‌دهد. <code>j2g</code> مسیر برعکس است.</p>
+
+  <h3>JOIN سال، سپس ستون‌ها</h3>
+  <p><code>jalali_join</code> یک جدول موقت <code>VALUES</code> می‌سازد. هر ردیف سه مقدار دارد: شمارهٔ سال شمسی، تاریخ نوروز آن سال، و تاریخ نوروز سال بعد. تاریخ میلادی ردیف فروش با شرط زیر به یک سال وصل می‌شود:</p>
+  <pre><code>sale_date &gt;= start_date  AND  sale_date &lt; next_start_date</code></pre>
+  <p>این JOIN از نوع <code>LEFT JOIN</code> است. اگر تاریخ تهی باشد یا بیرون از بازهٔ تنظیم‌شده بیفتد، ردیف فروش حذف نمی‌شود و همهٔ ستون‌های شمسی <code>NULL</code> می‌مانند.</p>
+  <p><code>jalali_columns</code> اختلاف روز تاریخ با نوروز همان سال را حساب می‌کند و ماه، روز، فصل و نام‌ها را در خود SQL می‌سازد. نام ماه‌ها و فصل‌ها و روزهای هفته متن ثابت فارسی هستند، نه ترجمهٔ رابط سوپرست.</p>
+  <table>
+    <thead>
+      <tr><th>ستون</th><th>معنی</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>jalali_year</code></td><td>سال، عدد</td></tr>
+      <tr><td><code>jalali_month_num</code></td><td>شمارهٔ ماه، ۱ تا ۱۲</td></tr>
+      <tr><td><code>jalali_day</code></td><td>روز ماه</td></tr>
+      <tr><td><code>jalali_date</code></td><td>متن مرتب‌شونده مثل <code>1403/07/18</code></td></tr>
+      <tr><td><code>jalali_date_int</code></td><td>کلید عددی <code>14030718</code></td></tr>
+      <tr><td><code>jalali_month</code></td><td>متن <code>1403-07</code></td></tr>
+      <tr><td><code>jalali_month_name</code></td><td>نام ماه، مثل مهر</td></tr>
+      <tr><td><code>jalali_month_label</code></td><td>برچسب نمودار و فیلتر، مثل <code>1403-07 مهر</code></td></tr>
+      <tr><td><code>jalali_season</code></td><td>نام فصل</td></tr>
+      <tr><td><code>jalali_season_key</code></td><td>فصل به‌همراه سال، مثل <code>1403-3 پاییز</code></td></tr>
+      <tr><td><code>jalali_weekday</code></td><td>نام روز هفته</td></tr>
+      <tr><td><code>jalali_weekday_num</code></td><td>شنبه = ۰ و جمعه = ۶</td></tr>
+      <tr><td><code>jalali_week_start</code></td><td>تاریخ میلادی شنبهٔ همان هفته</td></tr>
+    </tbody>
+  </table>
+  <p>هفته از شنبه شروع می‌شود. PostgreSQL روز یکشنبه را ۰ می‌شمارد. عبارت <code>(EXTRACT(DOW FROM date) + 1) % 7</code> شنبه را به ۰ می‌برد تا با فهرست «شنبه … جمعه» یکی شود.</p>
+  <p>رقم‌ها در این دمو لاتین هستند (<code>digits: latin</code>) تا فیلتر و مرتب‌سازی ساده بماند. با <code>digits='persian'</code> فقط ستون‌های متنی به ارقام فارسی برمی‌گردند. ستون‌های عددی، از جمله <code>jalali_date_int</code>، لاتین می‌مانند تا نوع عددی‌شان نشکند.</p>
+
+  <h3>فیلتر شمسی داخل خود داشبورد</h3>
+  <p>اپ میزبان بازهٔ تاریخ به توکن مهمان نمی‌فرستد. فیلتر تاریخ، فیلتر بومی داشبورد <code>sales-fa</code> روی دیتاست <code>sales_jalali</code> است.</p>
+  <table>
+    <thead>
+      <tr><th>فیلتر</th><th>ستون</th><th>کاربرد</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>سال</td><td><code>jalali_year</code></td><td>انتخاب یک یا چند سال</td></tr>
+      <tr><td>ماه</td><td><code>jalali_month_label</code></td><td>زیرمجموعهٔ سال انتخاب‌شده</td></tr>
+      <tr><td>فصل</td><td><code>jalali_season_key</code></td><td>مثل <code>1403-3 پاییز</code></td></tr>
+      <tr><td>بازه تاریخ (شمسی)</td><td><code>jalali_date_int</code></td><td>دو عدد <code>YYYYMMDD</code></td></tr>
+      <tr><td>دسته‌بندی</td><td><code>category</code></td><td>مستقل از تقویم</td></tr>
+    </tbody>
+  </table>
+  <p>بازه یک تقویم تصویری نیست. کاربر دو عدد وارد می‌کند. <code>14030701</code> تا <code>14030730</code> همان ۱ تا ۳۰ مهر ۱۴۰۳ است و با این شرط میلادی یکی است:</p>
+  <pre><code>sale_date &gt;= DATE '2024-09-22' AND sale_date &lt; DATE '2024-10-22'</code></pre>
+  <p>نقشه از این فیلترها بیرون است. دیتاست نقشه، <code>sales_by_branch</code>، از قبل به ازای هر شعبه جمع شده و ستون شمسی ندارد. نقشه همیشه همهٔ تاریخ‌ها را نشان می‌دهد و فقط قاعدهٔ منطقه روی آن می‌ماند.</p>
+  <p>این ستون‌ها عبارت محاسباتی‌اند و شاخص <code>sale_date</code> را به کار نمی‌گیرند. برای حجم دمو کافی است. روی دادهٔ واقعی باید هزینهٔ کوئری را جدا اندازه گرفت.</p>
+  <p>ابزار زمان خود سوپرست (grain، مقایسهٔ دوره‌ای، پیش‌بینی) میلادی می‌ماند. محورهای شمسی، محور دسته‌ای هستند: ماهی که در آن فروش نباشد روی نمودار نمی‌آید.</p>
+
+  <h2>داشبورد ترافیک: تابع ذخیره‌شده در پشتیبان</h2>
+  <p>داشبوردی که اپ میزبان نشان می‌دهد (<code>traffic-fa-embedded</code>) از بستهٔ بالا استفاده نمی‌کند. در <code>backups/02-bi.sql</code> تابع <code>bi.to_jalali(date)</code> داخل خود PostgreSQL ساخته می‌شود و موقع ساخت جدول <code>bi.violation</code> یک‌بار روی تاریخ تهران‌شدهٔ هر پایش اجرا می‌شود. نتیجه در دو ستون متنی ذخیره می‌شود:</p>
+  <ul>
+    <li><code>jalali_date</code> به شکل <code>1403-07-01</code></li>
+    <li><code>jalali_month</code> یعنی هفت نویسهٔ اول همان متن، مثل <code>1403-07</code></li>
+  </ul>
+  <p>این تابع به‌جای جدول نوروز، تبدیل حسابی میلادی به جلالی را در PL/pgSQL انجام می‌دهد: شمارش روز از مبدأ، سپس همان تقسیم ۱۸۶ روز اول سال و ماه‌های ۳۰روزه. فیلتر «تاریخ (شمسی)» در داشبورد ترافیک یک فهرست انتخابی روی همین <code>jalali_date</code> ذخیره‌شده است، نه بازهٔ عددی <code>jalali_date_int</code>.</p>
+  <p>هر دو مسیر ماه را بعد از روز ۱۸۶اُم با گام ۳۰روزه می‌شمارند. تفاوت عملی این است که فروش، شمسی را در لحظهٔ کوئری و بدون شیء تقویمی در پایگاه می‌سازد، و ترافیک، متن شمسی را هنگام ساخت لایهٔ <code>bi</code> در جدول واقعیت می‌نویسد.</p>
+</main>
+</body>
+</html>

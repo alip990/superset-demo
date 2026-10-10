@@ -2,19 +2,13 @@
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="utf-8"><title>اپلیکیشن میزبان — داشبورد تعبیه‌شده</title>
-
-  <link rel="stylesheet" href="/static/jalalidatepicker-1.0.0.css">
   <style>
     @font-face { font-family:Vazirmatn; src:url(/static/Vazirmatn-Regular.woff2) format("woff2"); font-display:swap; }
     body { font-family: Vazirmatn, Tahoma, sans-serif; margin: 0; background: #f4f5f7; }
     header { background: #1f2a44; color: #fff; padding: 12px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
     select { font: inherit; padding: 4px 8px; }
     code { background: #0002; padding: 2px 6px; border-radius: 4px; direction: ltr; display: inline-block; }
-    #dashboard { height: calc(100vh - 190px); min-height: 700px; }
-    input, button { font: inherit; padding: 6px 10px; border-radius: 5px; border: 1px solid #bbb; }
-    input { width: 125px; direction: ltr; }
-    button { cursor: pointer; }
-    #presets { display:flex; gap:6px; flex-wrap:wrap; }
+    #dashboard { height: calc(100vh - 64px); min-height: 700px; }
     #loading { position:fixed; bottom:24px; left:24px; padding:16px; background:#1f2a44; color:white; border-radius:8px; z-index:99; }
     #error { color:#ffb4b4; }
     #dashboard iframe { width: 100%; height: 100%; border: 0; }
@@ -23,21 +17,24 @@
 <body>
 <header>
   <strong>اپلیکیشن ما</strong>
-  <label>کاربر جاری:
+  <label>کاربر:
     <select id="user">
-      {% for k, u in users.items() %}<option value="{{k}}" {% if k == current %}selected{% endif %}>{{u.name}}</option>{% endfor %}
+      <option value="{{ admin }}" {% if admin == current_user %}selected{% endif %}>مدیر سامانه (انتخاب مستقیم شرکت)</option>
+      {% for u in users %}<option value="{{ u.username }}" {% if u.username == current_user %}selected{% endif %}>{{ u.username }} — {{ u.name }} ({{ u.company }})</option>{% endfor %}
     </select>
   </label>
-  <span>فیلتر اجباری (RLS در Guest Token): <code id="rls">…</code></span>
-  <label>از <input id="from" data-jdp placeholder="1403/07/01" aria-label="از تاریخ شمسی"></label>
-  <label>تا <input id="to" data-jdp placeholder="1403/07/30" aria-label="تا تاریخ شمسی"></label>
-  <button id="apply">اعمال</button><button id="clear">حذف فیلتر تاریخ</button>
-  <div id="presets"></div><span id="active"></span><span id="error" role="alert"></span>
+  <label>شرکت:
+    <select id="company">
+      {% for c in companies %}<option value="{{ c.id }}" {% if c.id == current_company %}selected{% endif %}>{{ "— " * c.level }}{{ c.title }}</option>{% endfor %}
+      {% if not companies %}<option value="">(این کاربر به هیچ شرکتی متصل نیست)</option>{% endif %}
+    </select>
+  </label>
+  <span>allowed_companies: <code id="allowed">…</code></span>
+  <span id="error" role="alert"></span>
 </header>
 <div id="loading" hidden>در حال بارگذاری داشبورد…</div>
 <div id="dashboard"></div>
 <script src="/static/embedded-sdk-0.3.0.js"></script>
-<script src="/static/jalalidatepicker-1.0.0.js"></script>
 <script>
   const el = id => document.getElementById(id);
   async function api(path, body) {
@@ -48,52 +45,64 @@
   }
   async function fetchGuestToken() {
     const j = await api('/guest-token');
-    el('rls').textContent = j.rls.map(rule => rule.clause).join(' AND ') || 'بدون محدودیت';
-    el('active').textContent = j.range ? `${j.range.from} — ${j.range.to} (${j.range_gregorian.from} — ${j.range_gregorian.to})` : 'همه تاریخ‌ها';
-    if (j.range) { el('from').value = j.range.from; el('to').value = j.range.to; }
+    el('allowed').textContent = j.allowed_companies || '—';
     return j.token;
   }
   let embedded;
   async function mount() {
     el('loading').hidden = false; el('error').textContent = '';
+    let observer;
+    const hideLoading = () => { el('loading').hidden = true; };
+    const attachLoad = () => {
+      const frame = el('dashboard').querySelector('iframe');
+      if (!frame || frame.dataset.loadWatch) return !!frame;
+      frame.dataset.loadWatch = '1';
+      frame.addEventListener('load', hideLoading, {once: true});
+      if (observer) observer.disconnect();
+      return true;
+    };
     try {
       if (embedded) embedded.unmount();
       el('dashboard').innerHTML = '';
+      observer = new MutationObserver(attachLoad);
+      observer.observe(el('dashboard'), {childList: true});
       embedded = await supersetEmbeddedSdk.embedDashboard({
         id: {{ dashboard_uuid | tojson }},
         supersetDomain: {{ superset_url | tojson }},
         mountPoint: el('dashboard'), fetchGuestToken,
-        dashboardUiConfig: {hideTitle:false, filters:{expanded:false}},
+        dashboardUiConfig: {hideTitle: false, filters: {visible: true, expanded: true}},
       });
-      const frame = el('dashboard').querySelector('iframe');
-      if (frame) frame.addEventListener('load', () => {el('loading').hidden=true;}, {once:true});
-    } catch (error) { el('error').textContent=error.message; }
-    finally { el('loading').hidden=true; }
+      attachLoad();
+    } catch (error) {
+      el('error').textContent = error.message;
+      hideLoading();
+      if (observer) observer.disconnect();
+    }
   }
   let actionQueue = Promise.resolve();
-  function change(path, body) {
+  function enqueue(task) {
     actionQueue = actionQueue.then(async () => {
-      const controls = [...document.querySelectorAll('header button, header input, header select')];
-      controls.forEach(control => {control.disabled=true;});
-      try { await api(path, body); await mount(); }
-      catch (error) { el('error').textContent=error.message; }
-      finally { controls.forEach(control => {control.disabled=false;}); }
+      const controls = [...document.querySelectorAll('header select')];
+      controls.forEach(control => { control.disabled = true; });
+      try { await task(); }
+      catch (error) { el('error').textContent = error.message; }
+      finally { controls.forEach(control => { control.disabled = false; }); }
     });
     return actionQueue;
   }
-  function applyRange(body) { return change('/range', body); }
-  el('user').onchange = e => change('/login', {user:e.target.value});
-  el('apply').onclick = () => applyRange({from:el('from').value,to:el('to').value});
-  el('clear').onclick = () => { el('from').value=''; el('to').value=''; applyRange({}); };
-  api('/jalali/presets').then(items => {
-    items.push({label:'مهر ۱۴۰۳',from:'1403/07/01',to:'1403/07/30'});
-    for (const item of items) {
-      const button=document.createElement('button'); button.textContent=item.label;
-      button.onclick=() => {el('from').value=item.from;el('to').value=item.to;applyRange({from:item.from,to:item.to});};
-      el('presets').appendChild(button);
-    }
-  }).catch(error => {el('error').textContent=error.message;});
-  if (window.jalaliDatepicker) jalaliDatepicker.startWatch();
+  const userSel = el('user'), companySel = el('company');
+  async function select(company) {
+    await api('/login', {user: userSel.value, company: company || null});
+    await mount();
+  }
+  userSel.onchange = () => enqueue(async () => {
+    const j = await api('/companies?user=' + encodeURIComponent(userSel.value));
+    companySel.innerHTML = j.companies.length
+      ? j.companies.map(c => `<option value="${c.id}">${'— '.repeat(c.level)}${c.title}</option>`).join('')
+      : '<option value="">(این کاربر به هیچ شرکتی متصل نیست)</option>';
+    await select(companySel.value || null);
+  });
+  companySel.onchange = () => enqueue(() => select(companySel.value || null));
   actionQueue = mount();
 </script>
 </body>

@@ -18,7 +18,8 @@ A fully containerised demo of **Apache Superset 6.1** that shows:
 | `superset` | `superset-demo:6.1.0-pg` | 8088 | Superset web app |
 | `superset-bootstrap` | `superset-demo:6.1.0-pg` | n/a | One-shot: provisions charts, dashboard, roles, users, RLS, embedding |
 | `tileserver` | `maptiler/tileserver-gl:v5.3.1` | 8081 | Serves `tiles/iran.mbtiles` as raster/vector tiles |
-| `embed-app` | `superset-demo:6.1.0-pg` | 8090 | Flask host app that embeds the dashboard via guest tokens |
+| `backup-db` | `postgres:14` | 5441 | Restored beta backup (`CrimeManagementDb`); company tree and traffic facts in schema `bi` |
+| `embed-app` | `superset-demo:6.1.0-pg` | 8090 | Flask host that embeds the traffic dashboard, scoped by the company tree |
 
 ## Sequence Diagram
 
@@ -63,20 +64,20 @@ sequenceDiagram
     participant PG as Postgres (demo DB)
     participant TS as tileserver (:8081)
 
-    U->>EA: GET / (pick user, e.g. ali_north)
-    EA->>SS: login as admin, GET dashboard/sales-fa/embedded
+    U->>EA: GET / (pick a user and a company in their subtree)
+    EA->>SS: login as admin, GET dashboard/traffic-fa-embedded/embedded
     SS-->>EA: embedded dashboard UUID
     EA-->>U: HTML page with iframe SDK
 
     U->>EA: GET /guest-token
-    EA->>EA: build RLS clause from user's regions and selected Jalali range
-    EA->>SS: POST /security/guest_token/ (dashboard UUID + RLS)
+    EA->>EA: pack the company id and every descendant into the guest username
+    EA->>SS: POST /security/guest_token/ (dashboard UUID, rls empty)
     SS-->>EA: signed JWT guest token
     EA-->>U: token
 
     U->>SS: load embedded dashboard (iframe, guest token)
-    SS->>PG: chart queries + RLS filter (region IN ...)
-    PG-->>SS: only rows the user may see
+    SS->>PG: virtual dataset filters company_id with get_guest_user_attribute('allowed_companies')
+    PG-->>SS: only rows in that company subtree
     SS-->>U: charts render
     U->>TS: GET /styles/basic-preview/{z}/{x}/{y}.png
     TS-->>U: map tiles (own map server)
@@ -198,7 +199,7 @@ Three ideas to hold on to:
 2. Create DB connection `Demo DB (mock)` using the read-only user `demo_reader`.
 3. Create datasets: `sales` (physical), `sales_jalali` (virtual calendar dimensions, with metric `total_amount`) and `sales_by_branch` (virtual, SQL aggregate for the map).
 4. Create 9 charts (map, total, monthly, daily, seasonal, pivot, recent sales, category, province) via `chart()` helper, which upserts by name.
-5. Build `position_json` (grid rows/widths) and create dashboard slug `sales-fa`.
+5. Build `position_json` (grid rows/widths) and create dashboard slug `sales-fa`, including the native Jalali filters.
 6. Enable embedding → prints `EMBEDDED_DASHBOARD_UUID`.
 7. Use the Flask app context + ORM to create roles `DemoViewer`, `EmbedGuest`, `RegionalUser`, users, and the RLS filter.
 
@@ -206,13 +207,15 @@ Idempotency: helper `find(resource, col, value)` looks up by name/slug. Renaming
 
 #### Embedding and guest tokens (`embed-app/app.py`)
 
-1. Page load: app logs in to Superset as admin and reads the dashboard's embedded UUID.
-2. The SDK calls `fetchGuestToken()` → `GET /guest-token`.
-3. The app maps the current app user to regions and the selected inclusive Jalali range to Gregorian dates, then posts to `/api/v1/security/guest_token/` with `resources` (the dashboard) and `rls` clauses.
-4. Superset returns a signed JWT (`GUEST_TOKEN_JWT_SECRET`, 10 min expiry, role `EmbedGuest`); the iframe uses it.
-5. Switching the user in the dropdown re-mounts the iframe with a new token.
+The host embeds `traffic-fa-embedded` (the company-tree traffic dashboard). See [SUPERSET_RLS_GUIDE.md](SUPERSET_RLS_GUIDE.md).
 
-The global region rule applies to every dataset, so each exposes `region`. The date rule is scoped to physical `sales`; Superset injects it inside virtual queries before aggregation, including the map. Range changes remount the iframe.
+1. Page load: the app reads activated users and the company tree from `backup-db` (`bi.app_user`, `bi.company`).
+2. The SDK calls `fetchGuestToken()` → `GET /guest-token`.
+3. The token's `rls` list is empty. The allowed company ids (the picked company and every company below it) are packed into the guest username as `<user>|<id>, <id>, ...`. `get_guest_user_attribute('allowed_companies')` unpacks that inside the virtual dataset. Do not put a date rule in the token.
+4. Superset returns a signed JWT (`GUEST_TOKEN_JWT_SECRET`, 10 min expiry, role `EmbedGuest`); the iframe uses it.
+5. Switching the user or company re-mounts the iframe with a new token. That remount clears dashboard filter selections.
+
+`__admin__` may pick any company. A real application user may pick only their own company and its descendants. The sales dashboard `sales-fa` is still provisioned for direct Superset use. The host embeds the traffic dashboard.
 
 #### Map server (no plugin needed)
 
@@ -327,13 +330,17 @@ Notes:
 - `embed-app` logs in as `admin` to mint guest tokens. Production should use a dedicated service account with only guest-token permission.
 - Sample data uses a fixed seed; regenerated only on a fresh DB volume.
 - Superset native time grains and time comparisons remain Gregorian; use Jalali category dimensions.
-- Calendar, SQL, host validation, and guest-token smoke tests are included.
+- The range filter is a numeric from/to on `jalali_date_int`, not a calendar picker. Users type or slide `YYYYMMDD` values (`14030701`–`14030730` is Mehr 1403).
+- Native filters on Jalali columns do not use the `sale_date` index. That is fine at demo size; watch it with real data.
+- The map is not date-filtered. It is excluded from every native filter, so it always shows all dates.
+- Filter selections reset when the user is switched, because the iframe is re-mounted.
+- Calendar, SQL, host, and guest-token smoke tests are included.
 - No custom plugin exists yet (see *Plugins* above).
 
 ### Suggested first-day path
 
 1. Bring the stack up (README) and open Superset as `admin`, look at the `sales-fa` dashboard.
-2. Open http://localhost:8090 and switch between the three users; watch the RLS clause change in the header and the numbers change.
+2. Open http://localhost:8090 and switch between the three users; watch the RLS clause change in the header and the numbers change. Filter dates in the dashboard filter bar (the host app has no date controls).
 3. Log in to Superset directly as `ali_north` / `ali_north` and compare (RLS via Jinja).
 4. Read `bootstrap.py` top to bottom, then `embed-app/app.py`.
 5. Try a task from *Common tasks* (add a chart or a user).
@@ -362,9 +369,23 @@ This is a **demo**. It uses default credentials, a static JWT secret, CORS/ifram
 
 The package has no runtime dependencies. Python and PostgreSQL use the same committed Nowruz table for years 1350–1550. The generator cross-checks jdatetime 6.1.0 and persiantools 4.0.0; newer persiantools 6.2.0 has different future leap corrections from year 1503. See [verified facts](docs/VERIFIED_FACTS.md) for source checks and the supported calendar convention.
 
-The embedded SDK, Jalali date picker, and Vazirmatn font are vendored under `embed-app/static` from the verified pinned CDN releases so browser startup does not require external assets.
+The embedded SDK and Vazirmatn font are vendored under `embed-app/static` from the verified pinned CDN releases so browser startup does not require external assets.
 
-The host accepts Latin, Persian and Arabic digits in `YYYY/MM/DD` or `YYYY-MM-DD`. It validates both dates, shows inclusive dates, and sends Gregorian half-open bounds on `sale_date`. Presets use Asia/Tehran and Saturday week starts. Use the **مهر ۱۴۰۳** preset to verify one monthly bar, `1403-07 مهر`; switch to `ali_north` and the total drops. Clearing the date filter restores all dates. Global region RLS still applies.
+### Filtering by Jalali date
+
+Date filtering happens inside the dashboard, on the `sales_jalali` dataset. The host app only picks a user and embeds the dashboard. The filter bar is visible and expanded.
+
+| Filter | Type | Column | How to use it |
+|---|---|---|---|
+| سال | Select | `jalali_year` | One or more years, sorted ascending |
+| ماه | Select | `jalali_month_label` | One or more months, sorted ascending. Cascades from سال, so choosing 1403 limits the month list to that year |
+| فصل | Select | `jalali_season_key` | One or more seasons, sorted ascending |
+| بازه تاریخ (شمسی) | Numeric range | `jalali_date_int` | From/to as `YYYYMMDD`. `14030701`–`14030730` is 1–30 Mehr 1403 |
+| دسته‌بندی | Select | `category` | Optional category filter |
+
+The map chart (`sales_by_branch`) is excluded from every filter. That dataset is already aggregated per branch and has no Jalali columns, so a date filter cannot apply to it. **The map always shows all dates** (still limited by the region security rule).
+
+To check Mehr 1403: set سال to `1403` and ماه to `1403-07 مهر`. The monthly chart shows one bar, the pivot shows one column, and the recent table only has Mehr dates. The same window as a range is `14030701`–`14030730`, which matches `sale_date >= '2024-09-22' AND sale_date < '2024-10-22'`. For `ali_north`, also require `region = 'north'`.
 
 ## Writing Jalali datasets
 
@@ -398,9 +419,10 @@ Date limitations:
 
 - Superset time picker, grains, trendlines, comparisons, rolling windows and forecasting stay Gregorian.
 - Category axes skip periods without data.
-- Range changes remount the iframe and reset dashboard filter selections.
-- Optional dashboard native Select filters are omitted; host presets and range inputs are the primary controls.
-- Filtering computed Jalali dimensions cannot use database date indexes; host date bounds use `sale_date`.
+- Switching the embedded user remounts the iframe and resets dashboard filter selections.
+- The dashboard range filter is numeric `YYYYMMDD` on `jalali_date_int`, not a calendar picker.
+- Filtering computed Jalali dimensions cannot use the `sale_date` index. `JALALI_SQL` limits the calendar join to years 1390–1420 so those filters stay faster at demo size.
+- The map always shows all dates.
 - Only PostgreSQL is implemented. Dataset editing and template processing should be limited to BI developers.
 
 ## Testing and server deployment
@@ -414,7 +436,7 @@ JALALI_TEST_DSN=postgresql://demo_reader:demo_reader@localhost:5440/demo .venv/b
 docker compose run --rm --no-deps superset-bootstrap python /app/scripts/smoke_embed.py
 ```
 
-Integration tests compare every SQL calendar column against Python and verify no public functions or Jalali sales columns exist and `demo_reader` cannot create tables. Guest smoke tests compare monthly and map totals with read-only SQL, combine region/date rules, and check cache isolation across ranges.
+Integration tests compare every SQL calendar column against Python and verify no public functions or Jalali sales columns exist and `demo_reader` cannot create tables. Guest smoke tests compare `sales_jalali` and map totals with read-only SQL under the region rule only. `ali_north` receives `region IN ('north')`; `manager` receives an empty `rls` list. CI also checks that `embed-app/` contains neither `sale_date` nor `superset_jalali_sql`.
 
 For remote browsers, set `.env` before starting:
 
@@ -423,7 +445,7 @@ SUPERSET_PUBLIC_URL=http://YOUR_SERVER:8088
 TILE_SERVER_PUBLIC_URL=http://YOUR_SERVER:8081
 ```
 
-Also add the host origin to `CORS_OPTIONS` in `superset_config.py`. Ports 8090 (host), 8088 (Superset), and 8081 (tiles) bind on the server; PostgreSQL binds only to loopback. One Superset worker with four threads fits this shared server. The host health check uses its own port.
+Set `HOST_APP_ORIGINS` (comma-separated, default `http://localhost:8090`) so the embedded host is allowed by CORS. Ports 8090 (host), 8088 (Superset), and 8081 (tiles) bind on the server; PostgreSQL binds only to loopback. One Superset worker with four threads fits this shared server. The host health check calls `GET /healthz`.
 
 This migration uses a new volume, `superset-demo_pgdata_jalali`, so the previous `superset-demo_pgdata` is preserved. A fresh checkout uses the new volume automatically. To regenerate this demo from scratch use `docker compose down -v && docker compose up --build -d` (this erases the active demo volume). Ordinary restarts preserve data.
 
@@ -431,4 +453,4 @@ Run `scripts/build_overview_tiles.sh` (requires `osmium-tool`) to reproduce the 
 
 The server's missing Iran map was rebuilt from the Geofabrik OSM extract with Planetiler using a filtered overview extract at max zoom 8 to fit this server. Tiles remain self-hosted; street-level detail needs a full-resolution build. The original README command can build the default zoom 14 map on a larger machine.
 
-Verified on the server: 14 unit/integration tests passed; bootstrap rerun completed; guest-token smoke passed; browser rendered all nine charts and the selected month in the pivot/recent table. Overview map tiles are served at port 8081. The host has a separate session cookie to preserve user/range across iframe loads.
+The host uses a separate session cookie (`embed_app_session`) so the iframe does not collide with Superset's session. Overview map tiles are served at port 8081.

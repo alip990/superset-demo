@@ -7,7 +7,10 @@ SQLALCHEMY_DATABASE_URI = "postgresql+psycopg2://postgres:postgres@db:5432/super
 REDIS_URL = "redis://redis:6379"
 CACHE_CONFIG = {"CACHE_TYPE": "RedisCache", "CACHE_DEFAULT_TIMEOUT": 300,
                 "CACHE_KEY_PREFIX": "superset_", "CACHE_REDIS_URL": f"{REDIS_URL}/0"}
-DATA_CACHE_CONFIG = {**CACHE_CONFIG, "CACHE_KEY_PREFIX": "superset_data_"}
+# Chart-data caching is off: company scope comes from get_guest_user_attribute(),
+# which Superset does not put in the cache key. A shared cache could serve one
+# company's rows to another company.
+DATA_CACHE_CONFIG = {"CACHE_TYPE": "NullCache"}
 
 # ---- Persian localisation ----
 BABEL_DEFAULT_LOCALE = "fa"
@@ -40,8 +43,9 @@ GUEST_ROLE_NAME = "EmbedGuest"
 GUEST_TOKEN_JWT_SECRET = os.environ.get("GUEST_TOKEN_JWT_SECRET", "demo-guest-token-secret")
 GUEST_TOKEN_JWT_EXP_SECONDS = 600
 ENABLE_CORS = True
+HOST_APP_ORIGINS = [origin.strip() for origin in os.environ.get("HOST_APP_ORIGINS", "http://localhost:8090").split(",") if origin.strip()]
 CORS_OPTIONS = {"supports_credentials": True, "allow_headers": ["*"], "resources": ["*"],
-                "origins": ["http://localhost:8090", "http://168.119.186.100:8090"]}
+                "origins": HOST_APP_ORIGINS}
 # demo only: no CSP so iframe + external tile server work; set a real CSP in production
 TALISMAN_ENABLED = False
 HTTP_HEADERS = {"X-Frame-Options": "ALLOWALL"}
@@ -50,6 +54,24 @@ WTF_CSRF_ENABLED = True
 
 FAB_ADD_SECURITY_API = True  # /api/v1/security/roles, users ... for automation
 
+# Company-tree tenancy for the embedded traffic dashboard (see SUPERSET_RLS_GUIDE.md).
+# Superset 6.1 drops user.attributes from guest-token requests, so the host app
+# packs the allowed company ids into the username: "<app user>|<id>, <id>, ...".
+def get_guest_user_attribute(attribute_name, default=None):
+    """Polyfill for SIP-174's get_guest_user_attribute Jinja macro."""
+    from flask import g
+
+    if hasattr(g, "user") and hasattr(g.user, "guest_token"):
+        user_payload = g.user.guest_token.get("user", {})
+        attributes = user_payload.get("attributes") or {}
+        if attribute_name in attributes:
+            return attributes[attribute_name]
+        username = user_payload.get("username", "")
+        if "|" in username and attribute_name == "allowed_companies":
+            return username.split("|", 1)[1].strip()
+    return default
+
+
 from superset_jalali_sql import JINJA_ADDONS
-JINJA_CONTEXT_ADDONS = dict(JINJA_ADDONS)
-JALALI_SQL = {"dialect": "postgresql", "digits": "latin"}
+JINJA_CONTEXT_ADDONS = {**JINJA_ADDONS, "get_guest_user_attribute": get_guest_user_attribute}
+JALALI_SQL = {"dialect": "postgresql", "digits": "latin", "min_year": 1390, "max_year": 1420}
