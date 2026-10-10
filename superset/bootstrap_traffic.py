@@ -1,11 +1,8 @@
-"""Traffic-police dashboards on the restored beta backup (backup-db, schema bi - see backups/02-bi.sql).
+"""Vehicle dashboard on the restored backup.
 
-Builds the same tabbed dashboard twice:
-- traffic-fa: physical bi.violation for direct Superset logins, with company-tree RLS
-  (a user linked to a company in bi.company_user sees it and every company below it);
-- traffic-fa-embedded: for guest tokens. Its datasets are virtual and filter on
-  get_guest_user_attribute('allowed_companies') (see SUPERSET_RLS_GUIDE.md), so the
-  guest token itself carries no rls.
+Company and user rows stay in UserManagementDb (um."Company", um."User").
+The embedded copy filters with get_guest_user_attribute('allowed_companies').
+A direct login whose username matches um."User" sees that company and every company below it.
 """
 import json, os
 import requests
@@ -61,17 +58,15 @@ def dataset(name, sql=None, schema="bi"):
 
 
 violation_ds = dataset("violation")
-# tenant-scoped copy for guest tokens: the snippet from SUPERSET_RLS_GUIDE.md
+vehicle_ds = dataset("vehicle")
 violation_scoped_ds = dataset("violation_scoped", sql="""SELECT * FROM bi.violation
 WHERE 1=1
 {% set allowed_companies = get_guest_user_attribute('allowed_companies') %}
 {% if allowed_companies %}
   AND company_id IN ({{ allowed_companies }})
 {% else %}
-  AND 1=0 -- Failsafe: if the attribute is missing, return nothing to prevent data leaks
+  AND 1=0
 {% endif %}""")
-# no company_id column: shared reference data, needs no tenant filter
-vehicle_ds = dataset("vehicle")
 
 # ---------- metrics & helpers ----------
 def metric(sql, label):
@@ -317,17 +312,16 @@ def build_dashboard(ds, slug, title, suffix="", extra_fleet_row=None):
 
 
 TITLE = "داشبورد پایش سرعت - پلیس راهور"
-dash_id, _ = build_dashboard(violation_ds, "traffic-fa", TITLE)
-vehicle_chart = chart("ناوگان ثبت‌شده (بدون company_id) - تعبیه", "table", {
+vehicle_chart = chart("ناوگان ثبت‌شده", "table", {
     "query_mode": "raw", "all_columns": ["plate", "vehicle_model", "vehicle_usage"], "row_limit": 200,
     "server_pagination": False, "order_by_cols": [], "include_search": True,
 }, vehicle_ds)
-embed_dash_id, _ = build_dashboard(violation_scoped_ds, "traffic-fa-embedded", TITLE + " (تعبیه‌شده)",
-                                   suffix=" - تعبیه", extra_fleet_row={"fleet": vehicle_chart})
+dash_id, _ = build_dashboard(violation_ds, "traffic-fa", TITLE, extra_fleet_row={"fleet": vehicle_chart})
+embed_dash_id, _ = build_dashboard(violation_scoped_ds, "traffic-fa-embedded", TITLE + " (تعبیه‌شده)", suffix=" - تعبیه")
 embedded = api("POST", f"dashboard/{embed_dash_id}/embedded", json={"allowed_domains": []})["result"]["uuid"]
 print("TRAFFIC_EMBEDDED_DASHBOARD_UUID", embedded)
 
-# ---------- company-tree users & RLS ----------
+# ---------- company tree from the backup's own user and company tables ----------
 from superset.app import create_app  # noqa: E402
 
 app = create_app()
@@ -344,18 +338,18 @@ with app.app_context():
     if pv:
         sm.add_permission_role(role, pv)
 
-    # guest tokens may only read the tenant-scoped virtual dataset and the company-free one
-    guest = sm.find_role("EmbedGuest")
+    vehicle_table = db.session.get(SqlaTable, vehicle_ds)
+    pv = sm.find_permission_view_menu("datasource_access", vehicle_table.get_perm())
+    if pv:
+        sm.add_permission_role(role, pv)
+
+    guest = sm.find_role("EmbedGuest") or sm.add_role("EmbedGuest")
+    for pv in sm.find_role("Gamma").permissions:
+        sm.add_permission_role(guest, pv)
     for ds_id in (violation_scoped_ds, vehicle_ds):
         pv = sm.find_permission_view_menu("datasource_access", db.session.get(SqlaTable, ds_id).get_perm())
         if pv:
             sm.add_permission_role(guest, pv)
-
-    # usernames must match bi.company_user in backups/02-bi.sql
-    for uname, first in [("traffic_national", "پلیس کل کشور"), ("traffic_qom", "پلیس قم"),
-                         ("traffic_tehran", "پلیس تهران")]:
-        if not sm.find_user(username=uname):
-            sm.add_user(uname, first, "Demo", f"{uname}@example.com", [role], password=uname)
 
     rls = db.session.query(RowLevelSecurityFilter).filter_by(name="company-tree-by-current-user").one_or_none()
     if not rls:
@@ -363,11 +357,12 @@ with app.app_context():
         db.session.add(rls)
     rls.filter_type = RowLevelSecurityFilterType.REGULAR
     rls.clause = ("company_id IN (SELECT cc.descendant_id FROM bi.company_closure cc "
-                  "JOIN bi.company_user cu ON cu.company_id = cc.ancestor_id "
-                  "WHERE cu.username = '{{ current_username() }}')")
+                  'JOIN um_src."UserAttribute" ua ON ua."CompanyId" = cc.ancestor_id AND NOT ua."Deleted" '
+                  'JOIN um_src."User" u ON u."Id" = ua."UserId" AND NOT u."Deleted" '
+                  "WHERE u.\"UserName\" = '{{ current_username() }}')")
     rls.tables = [table]
     rls.roles = [role]
     rls.description = "A user sees their own company and every company below it in the tree"
     db.session.commit()
 
-print("TRAFFIC_BOOTSTRAP_DONE dashboard_ids=", dash_id, embed_dash_id)
+print("TRAFFIC_BOOTSTRAP_DONE dashboard_id=", dash_id)

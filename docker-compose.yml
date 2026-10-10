@@ -5,11 +5,8 @@ x-superset: &superset
   build: {context: ., dockerfile: superset/Dockerfile}
   environment:
     SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
-    TILE_SERVER_PUBLIC_URL: ${TILE_SERVER_PUBLIC_URL:-http://localhost:8081}
-    HOST_APP_ORIGINS: ${HOST_APP_ORIGINS:-http://localhost:8090}
   volumes:
     - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
-    - ./superset/bootstrap.py:/app/bootstrap.py:ro
   depends_on:
     db: {condition: service_healthy}
     redis: {condition: service_started}
@@ -20,11 +17,11 @@ services:
     environment: {POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres}
     volumes:
       - ./db/01-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-      - pgdata_jalali:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     ports: ["127.0.0.1:5440:5432"]
     healthcheck: {test: ["CMD", "pg_isready", "-U", "postgres"], interval: 5s, retries: 20}
 
-  # Restored 1 May beta backup (Postgres 14). Company tree and traffic facts live in schema bi.
+  # Restored vehicle backup. Schema bi is built by backups/02-bi.sql after the dump.
   backup-db:
     image: postgres:14
     environment: {POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres}
@@ -55,34 +52,20 @@ services:
       superset-init: {condition: service_completed_successfully}
     healthcheck: {test: ["CMD", "curl", "-f", "http://localhost:8088/health"], interval: 10s, retries: 30}
 
-  # creates DB connection, datasets, charts, dashboards, roles, users, RLS, embedding
   superset-bootstrap:
     <<: *superset
-    command: bash -c "python /app/bootstrap.py && python /app/bootstrap_traffic.py"
+    command: python /app/bootstrap_traffic.py
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
-      - ./superset/bootstrap.py:/app/bootstrap.py:ro
       - ./superset/bootstrap_traffic.py:/app/bootstrap_traffic.py:ro
-      - ./scripts:/app/scripts:ro
     environment:
       SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
       SUPERSET_URL: http://superset:8088
-      TILE_SERVER_PUBLIC_URL: ${TILE_SERVER_PUBLIC_URL:-http://localhost:8081}
-      HOST_APP_ORIGINS: ${HOST_APP_ORIGINS:-http://localhost:8090}
-      MAP_TILE_URL: "${MAP_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}"
+      MAP_TILE_URL: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
     depends_on:
       superset: {condition: service_healthy}
       backup-db: {condition: service_healthy}
 
-  # our own map server: vector tiles built from OSM (Iran extract) via planetiler
-  tileserver:
-    restart: unless-stopped
-    image: maptiler/tileserver-gl:v5.3.1
-    command: ["--file", "/data/iran.mbtiles", "-p", "8080", "-u", "${TILE_SERVER_PUBLIC_URL:-http://localhost:8081}"]
-    volumes: ["./tiles:/data"]
-    ports: ["8081:8080"]
-
-  # host application that embeds a dashboard in an iframe using guest tokens
   embed-app:
     image: superset-demo:6.1.0-pg
     command: python /srv/app.py
@@ -91,7 +74,7 @@ services:
     environment:
       SUPERSET_URL: http://superset:8088
       SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://localhost:8088}
-      EMBED_DASHBOARD_SLUG: ${EMBED_DASHBOARD_SLUG:-traffic-fa-embedded}
+      EMBED_DASHBOARD_SLUG: traffic-fa-embedded
       COMPANY_DB_URL: postgresql://bi_reader:bi_reader@backup-db:5432/CrimeManagementDb
     restart: unless-stopped
     healthcheck: {test: ["CMD", "curl", "-f", "http://localhost:8090/healthz"], interval: 30s, timeout: 10s, retries: 3}
@@ -102,5 +85,5 @@ services:
       backup-db: {condition: service_healthy}
 
 volumes:
-  pgdata_jalali:
+  pgdata:
   backupdata:

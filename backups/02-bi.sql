@@ -41,46 +41,23 @@ BEGIN
   RETURN lpad(jy::text,4,'0') || '-' || lpad(jm::text,2,'0') || '-' || lpad(jd::text,2,'0');
 END $$;
 
--- ---------- company tree (national police -> provincial police) ----------
-CREATE TABLE bi.company AS
-SELECT "Id" AS company_id, "ParentId" AS parent_id, "Title" AS title, "Depth" AS depth,
-       -- provincial companies are matched to crime records by province name
-       CASE WHEN "Title" LIKE '%قم%' THEN 'قم' WHEN "Title" LIKE '%تهران%' THEN 'تهران' END AS province_name
-FROM dm_src."Company" WHERE NOT "Deleted";
-ALTER TABLE bi.company ADD PRIMARY KEY (company_id);
-
--- every (ancestor, descendant) pair incl. self: a user of the ancestor may see the descendant
-CREATE VIEW bi.company_closure AS
-WITH RECURSIVE t AS (
-  SELECT company_id AS ancestor_id, company_id AS descendant_id FROM bi.company
-  UNION ALL
-  SELECT t.ancestor_id, c.company_id FROM bi.company c JOIN t ON c.parent_id = t.descendant_id
-) SELECT * FROM t;
-
--- ---------- real application users (UserManagementDb) and their company ----------
+-- ---------- real application users and companies stay in UserManagementDb ----------
 CREATE SERVER user_mgmt FOREIGN DATA WRAPPER postgres_fdw OPTIONS (dbname 'UserManagementDb');
 CREATE USER MAPPING FOR postgres SERVER user_mgmt OPTIONS (user 'postgres');
 CREATE SCHEMA um_src;
-IMPORT FOREIGN SCHEMA um LIMIT TO ("User", "UserAttribute") FROM SERVER user_mgmt INTO um_src;
+-- Company and user rows stay in the 1 May backup (UserManagementDb). These are foreign tables, not copies.
+IMPORT FOREIGN SCHEMA um LIMIT TO ("User", "UserAttribute", "Company") FROM SERVER user_mgmt INTO um_src;
 
--- the embed app lets you pick one of these users; the guest token is scoped to their company subtree
-CREATE TABLE bi.app_user AS
-SELECT u."UserName" AS username, u."FirstName" || ' ' || u."LastName" AS full_name,
-       c.company_id,  -- NULL: user has no (live) company -> sees no data
-       u."Activated" AS activated
-FROM um_src."User" u
-LEFT JOIN um_src."UserAttribute" ua ON ua."UserId" = u."Id" AND NOT ua."Deleted"
-LEFT JOIN bi.company c ON c.company_id = ua."CompanyId"
-WHERE NOT u."Deleted";
-ALTER TABLE bi.app_user ADD PRIMARY KEY (username);
-
--- which Superset user belongs to which company (used by the company-tree RLS rule,
--- see superset/bootstrap_traffic.py)
-CREATE TABLE bi.company_user (username text PRIMARY KEY, company_id bigint NOT NULL REFERENCES bi.company);
-INSERT INTO bi.company_user
-SELECT 'traffic_national', company_id FROM bi.company WHERE parent_id IS NULL
-UNION ALL SELECT 'traffic_qom', company_id FROM bi.company WHERE province_name = 'قم'
-UNION ALL SELECT 'traffic_tehran', company_id FROM bi.company WHERE province_name = 'تهران';
+-- ancestor includes self, so a user of a company also sees that company
+CREATE VIEW bi.company_closure AS
+WITH RECURSIVE t AS (
+  SELECT "Id" AS ancestor_id, "Id" AS descendant_id FROM um_src."Company" WHERE NOT "Deleted"
+  UNION ALL
+  SELECT t.ancestor_id, c."Id"
+  FROM um_src."Company" c
+  JOIN t ON c."ParentId" = t.descendant_id
+  WHERE NOT c."Deleted"
+) SELECT * FROM t;
 
 -- ---------- vehicles, one per device ----------
 -- NB: CR.DeviceCrime.DeviceId is always DM.Device.Id + 1 in the source data.
@@ -114,7 +91,7 @@ SELECT b."Id" AS id,
        (ARRAY['۲ دوشنبه','۳ سه‌شنبه','۴ چهارشنبه','۵ پنجشنبه','۶ جمعه','۰ شنبه','۱ یکشنبه'])
          [extract(isodow FROM b.local_ts)::int] AS weekday,
        b."ProvinceName" AS province,
-       c.company_id, c.title AS company, pc.title AS parent_company,
+       c."Id" AS company_id, c."Title" AS company, pc."Title" AS parent_company,
        CASE b."CrimeStatus" WHEN 1002002 THEN 'دارای تخلف' WHEN 1002003 THEN 'لیست سیاه' ELSE 'بدون خلافی' END AS status,
        (b."CrimeStatus" <> 1002001)::int AS is_violation,
        coalesce(nullif(trim(b."CrimeLocationTitle"), ''), 'نامشخص') AS location,
@@ -128,8 +105,11 @@ SELECT b."Id" AS id,
        coalesce(v.vehicle_model, 'نامشخص') AS vehicle_model,
        coalesce(v.vehicle_usage, 'نامشخص') AS vehicle_usage
 FROM base b
-LEFT JOIN bi.company c ON c.province_name = b."ProvinceName"
-LEFT JOIN bi.company pc ON pc.company_id = c.parent_id
+LEFT JOIN um_src."Company" c
+  ON NOT c."Deleted"
+ AND ((b."ProvinceName" = 'تهران' AND c."Title" LIKE '%تهران%')
+   OR (b."ProvinceName" = 'قم' AND c."Title" LIKE '%قم%'))
+LEFT JOIN um_src."Company" pc ON pc."Id" = c."ParentId"
 LEFT JOIN bi.vehicle v ON v.crime_device_id = b."DeviceId";
 
 ALTER TABLE bi.violation ADD PRIMARY KEY (id);
@@ -144,6 +124,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 GRANT CONNECT ON DATABASE "CrimeManagementDb" TO bi_reader;
-GRANT USAGE ON SCHEMA bi TO bi_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA bi TO bi_reader;
+GRANT USAGE ON SCHEMA bi, um_src, dm_src TO bi_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA bi, um_src, dm_src TO bi_reader;
 GRANT EXECUTE ON FUNCTION bi.to_jalali(date) TO bi_reader;
+CREATE USER MAPPING FOR bi_reader SERVER user_mgmt OPTIONS (user 'postgres', password_required 'false');
+CREATE USER MAPPING FOR bi_reader SERVER device_mgmt OPTIONS (user 'postgres', password_required 'false');

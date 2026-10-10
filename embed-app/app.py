@@ -1,7 +1,11 @@
-"""Host application: pick an application user and one company in their subtree,
-then embed the traffic dashboard. The guest token carries no RLS clause.
-Allowed company ids are packed into the username; the virtual dataset reads
-them with get_guest_user_attribute('allowed_companies')."""
+"""Host app: pick a real backup user and one company in their subtree, then embed
+the traffic dashboard. The guest token carries no row filter of its own.
+Allowed company ids are packed into the username and read by
+get_guest_user_attribute('allowed_companies').
+
+Users and companies are the 1 May tables um."User" and um."Company"
+(exposed in CrimeManagementDb as foreign tables). This app does not copy them.
+"""
 import os
 import psycopg2
 import requests
@@ -18,13 +22,19 @@ ADMIN = "__admin__"
 
 COMPANY_TREE_SQL = """
 WITH RECURSIVE company_tree AS (
-    SELECT company_id AS id, parent_id, 0 AS level FROM bi.company WHERE company_id = %(user_company_id)s
+    SELECT "Id" AS id, "ParentId" AS parent_id, 0 AS level
+    FROM um_src."Company"
+    WHERE "Id" = %(user_company_id)s AND NOT "Deleted"
     UNION ALL
-    SELECT c.company_id, c.parent_id, ct.level + 1 FROM bi.company c
-    INNER JOIN company_tree ct ON c.parent_id = ct.id
+    SELECT c."Id", c."ParentId", ct.level + 1
+    FROM um_src."Company" c
+    INNER JOIN company_tree ct ON c."ParentId" = ct.id
+    WHERE NOT c."Deleted"
 )
-SELECT ct.id, c.title, ct.level FROM company_tree ct JOIN bi.company c ON c.company_id = ct.id
-ORDER BY ct.level, c.title
+SELECT ct.id, c."Title", ct.level
+FROM company_tree ct
+JOIN um_src."Company" c ON c."Id" = ct.id
+ORDER BY ct.level, c."Title"
 """
 
 app = Flask(__name__, template_folder=".")
@@ -39,25 +49,35 @@ def query(sql, params=None):
 
 
 def app_users():
-    rows = query("""SELECT a.username, a.full_name, a.company_id, coalesce(c.title, 'بدون شرکت')
-                    FROM bi.app_user a LEFT JOIN bi.company c USING (company_id)
-                    WHERE a.activated ORDER BY c.depth NULLS LAST, c.title, a.username""")
+    rows = query("""
+        SELECT u."UserName", u."FirstName" || ' ' || u."LastName", ua."CompanyId",
+               coalesce(c."Title", 'بدون شرکت')
+        FROM um_src."User" u
+        LEFT JOIN um_src."UserAttribute" ua ON ua."UserId" = u."Id" AND NOT ua."Deleted"
+        LEFT JOIN um_src."Company" c ON c."Id" = ua."CompanyId" AND NOT c."Deleted"
+        WHERE NOT u."Deleted" AND u."Activated"
+        ORDER BY c."Depth" NULLS LAST, c."Title", u."UserName"
+    """)
     return [{"username": u, "name": n, "company_id": cid, "company": ct} for u, n, cid, ct in rows]
 
 
 def company_subtree(company_id):
     if company_id is None:
         return []
-    return [{"id": cid, "title": t, "level": lvl}
-            for cid, t, lvl in query(COMPANY_TREE_SQL, {"user_company_id": company_id})]
+    return [{"id": cid, "title": title, "level": level}
+            for cid, title, level in query(COMPANY_TREE_SQL, {"user_company_id": company_id})]
 
 
 def selectable_companies(username):
-    """Companies this user may pick, or None when the username is not a known user."""
     if username == ADMIN:
-        return [c for root in query("SELECT company_id FROM bi.company WHERE parent_id IS NULL")
-                for c in company_subtree(root[0])]
-    rows = query("SELECT company_id FROM bi.app_user WHERE username = %s AND activated", (username,))
+        roots = query('SELECT "Id" FROM um_src."Company" WHERE "ParentId" IS NULL AND NOT "Deleted"')
+        return [company for (root,) in roots for company in company_subtree(root)]
+    rows = query("""
+        SELECT ua."CompanyId"
+        FROM um_src."User" u
+        LEFT JOIN um_src."UserAttribute" ua ON ua."UserId" = u."Id" AND NOT ua."Deleted"
+        WHERE u."UserName" = %s AND NOT u."Deleted" AND u."Activated"
+    """, (username,))
     if not rows:
         return None
     return company_subtree(rows[0][0])
