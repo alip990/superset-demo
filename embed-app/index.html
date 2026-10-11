@@ -45,7 +45,8 @@
   }
   async function fetchGuestToken() {
     const j = await api('/guest-token');
-    el('allowed').textContent = j.allowed_companies || '—';
+    const allowed = j.allowed_companies || [];
+    el('allowed').textContent = allowed.length ? allowed.join(', ') : '—';
     return j.token;
   }
   let embedded;

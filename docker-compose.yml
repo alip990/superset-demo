@@ -7,6 +7,7 @@ x-superset: &superset
     SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
   volumes:
     - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+    - ./superset/guest_user_attributes.py:/app/pythonpath/guest_user_attributes.py:ro
   depends_on:
     db: {condition: service_healthy}
     redis: {condition: service_started}
@@ -57,6 +58,7 @@ services:
     command: python /app/bootstrap_traffic.py
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./superset/guest_user_attributes.py:/app/pythonpath/guest_user_attributes.py:ro
       - ./superset/bootstrap_traffic.py:/app/bootstrap_traffic.py:ro
     environment:
       SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py

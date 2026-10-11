@@ -6,8 +6,9 @@ SQLALCHEMY_DATABASE_URI = "postgresql+psycopg2://postgres:postgres@db:5432/super
 REDIS_URL = "redis://redis:6379"
 CACHE_CONFIG = {"CACHE_TYPE": "RedisCache", "CACHE_DEFAULT_TIMEOUT": 300,
                 "CACHE_KEY_PREFIX": "superset_", "CACHE_REDIS_URL": f"{REDIS_URL}/0"}
-# Guest company scope is not part of Superset's data-cache key.
-DATA_CACHE_CONFIG = {"CACHE_TYPE": "NullCache"}
+# The backport adds get_guest_user_attribute() to ExtraCache.regex, so the
+# company list is part of the query cache key and the data cache can stay on.
+DATA_CACHE_CONFIG = {**CACHE_CONFIG, "CACHE_KEY_PREFIX": "superset_data_"}
 
 BABEL_DEFAULT_LOCALE = "fa"
 LANGUAGES = {
@@ -30,22 +31,15 @@ TALISMAN_ENABLED = False
 HTTP_HEADERS = {"X-Frame-Options": "ALLOWALL"}
 FAB_ADD_SECURITY_API = True
 
-# Superset 6.1 drops guest user.attributes, so the host packs company ids into the username.
-def get_guest_user_attribute(attribute_name, default=None):
-    from flask import g
+# 6.1.0 drops user.attributes and has no macro for them. guest_user_attributes.py
+# backports both from Superset master, so the company list stays a real attribute.
+def FLASK_APP_MUTATOR(app):  # noqa: N802
+    from guest_user_attributes import install
 
-    if hasattr(g, "user") and hasattr(g.user, "guest_token"):
-        user_payload = g.user.guest_token.get("user", {})
-        attributes = user_payload.get("attributes") or {}
-        if attribute_name in attributes:
-            return attributes[attribute_name]
-        username = user_payload.get("username", "")
-        if "|" in username and attribute_name == "allowed_companies":
-            return username.split("|", 1)[1].strip()
-    return default
+    install()
 
 
 from superset_jalali_sql import JINJA_ADDONS
 
-JINJA_CONTEXT_ADDONS = {**JINJA_ADDONS, "get_guest_user_attribute": get_guest_user_attribute}
+JINJA_CONTEXT_ADDONS = dict(JINJA_ADDONS)
 JALALI_SQL = {"dialect": "postgresql", "digits": "latin", "min_year": 1390, "max_year": 1420}

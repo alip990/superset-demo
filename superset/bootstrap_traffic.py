@@ -61,9 +61,9 @@ violation_ds = dataset("violation")
 vehicle_ds = dataset("vehicle")
 violation_scoped_ds = dataset("violation_scoped", sql="""SELECT * FROM bi.violation
 WHERE 1=1
-{% set allowed_companies = get_guest_user_attribute('allowed_companies') %}
+{% set allowed_companies = get_guest_user_attribute('allowed_companies', escape_result=False) %}
 {% if allowed_companies %}
-  AND company_id IN ({{ allowed_companies }})
+  AND company_id IN {{ allowed_companies | where_in }}
 {% else %}
   AND 1=0
 {% endif %}""")

@@ -1,6 +1,6 @@
 """Host app: pick a real backup user and one company in their subtree, then embed
 the traffic dashboard. The guest token carries no row filter of its own.
-Allowed company ids are packed into the username and read by
+Allowed company ids travel as user.attributes.allowed_companies and are read by
 get_guest_user_attribute('allowed_companies').
 
 Users and companies are the 1 May tables um."User" and um."Company"
@@ -159,16 +159,17 @@ def login():
 @app.get("/guest-token")
 def guest_token():
     username, company = current_selection()
-    allowed = ", ".join(str(c["id"]) for c in company_subtree(company))
+    allowed = [c["id"] for c in company_subtree(company)]
     s = superset_session()
     body = {
-        "user": {"username": f"{username}|{allowed}", "first_name": username, "last_name": ""},
+        "user": {"username": username, "first_name": username, "last_name": "",
+                 "attributes": {"allowed_companies": allowed}},
         "resources": [{"type": "dashboard", "id": embedded_uuid(s)}],
         "rls": [],
     }
     r = s.post(f"{SUPERSET}/api/v1/security/guest_token/", json=body, timeout=30)
     r.raise_for_status()
-    return jsonify(token=r.json()["token"], rls=[], allowed_companies=allowed or "—")
+    return jsonify(token=r.json()["token"], rls=[], allowed_companies=allowed)
 
 
 if __name__ == "__main__":
