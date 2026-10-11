@@ -39,7 +39,15 @@ def FLASK_APP_MUTATOR(app):  # noqa: N802
     install()
 
 
-from superset_jalali_sql import JINJA_ADDONS
+def get_guest_user_attribute(attribute_name, default=None, **kwargs):
+    # Dataset rendering binds this helper to the query's ExtraCache in the backport.
+    from superset.jinja_context import ExtraCache
 
-JINJA_CONTEXT_ADDONS = dict(JINJA_ADDONS)
-JALALI_SQL = {"dialect": "postgresql", "digits": "latin", "min_year": 1390, "max_year": 1420}
+    return ExtraCache().get_guest_user_attribute(attribute_name, default, **kwargs)
+
+
+JINJA_CONTEXT_ADDONS = {"get_guest_user_attribute": get_guest_user_attribute}
+JALALI = {"sql_min_year": 1400, "sql_max_year": 1410}
+
+from superset_jalali import init_jalali
+init_jalali(globals())

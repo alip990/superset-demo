@@ -3,4 +3,3 @@ tiles/
 .venv
 plugins/
 **/__pycache__
-**/.pytest_cache
