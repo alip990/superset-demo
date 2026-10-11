@@ -1,5 +1,4 @@
 tiles/
 .git
 .venv
-plugins/
 **/__pycache__

@@ -77,10 +77,11 @@ WHERE 1=1
 for ds in (violation_ds, violation_scoped_ds):
     api("PUT", f"dataset/{ds}/refresh")
     columns = api("GET", f"dataset/{ds}")["result"]["columns"]
-    occurred_at = next(col for col in columns if col["column_name"] == "occurred_at")
     api("PUT", f"dataset/{ds}?override_columns=false", json={
         "main_dttm_col": "occurred_at",
-        "columns": [{"id": occurred_at["id"], "column_name": "occurred_at", "is_dttm": True}],
+        "columns": [{"id": col["id"], "column_name": col["column_name"],
+                     "is_dttm": True if col["column_name"] == "occurred_at" else col["is_dttm"]}
+                    for col in columns],
     })
 
 # ---------- metrics & helpers ----------
