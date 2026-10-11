@@ -367,6 +367,12 @@ with app.app_context():
     if pv:
         sm.add_permission_role(role, pv)
 
+    # Recreate the existing demo logins after a metadata-only reset.
+    # Company RLS still requires a matching username in the backup's um.User.
+    for username in ("traffic_national", "traffic_qom", "traffic_tehran"):
+        if not sm.find_user(username=username):
+            sm.add_user(username, "Traffic", username, f"{username}@example.com", role, password=username)
+
     guest = sm.find_role("EmbedGuest") or sm.add_role("EmbedGuest")
     for pv in sm.find_role("Gamma").permissions:
         sm.add_permission_role(guest, pv)
