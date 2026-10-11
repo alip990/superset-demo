@@ -57,16 +57,30 @@ def dataset(name, sql=None, schema="bi"):
     return api("POST", "dataset/", json=body)["id"]
 
 
-violation_ds = dataset("violation")
+VIOLATION_SQL = """SELECT v.*, {{ jalali_columns('v.occurred_at') }}
+FROM bi.violation v
+{{ jalali_join('v.occurred_at') }}"""
+
+violation_ds = dataset("violation_jalali", sql=VIOLATION_SQL)
 vehicle_ds = dataset("vehicle")
-violation_scoped_ds = dataset("violation_scoped", sql="""SELECT * FROM bi.violation
+violation_scoped_ds = dataset("violation_scoped", sql=VIOLATION_SQL + """
 WHERE 1=1
 {% set allowed_companies = get_guest_user_attribute('allowed_companies', escape_result=False) %}
 {% if allowed_companies %}
-  AND company_id IN {{ allowed_companies | where_in }}
+  AND v.company_id IN {{ allowed_companies | where_in }}
 {% else %}
   AND 1=0
 {% endif %}""")
+
+# Sync virtual columns before choosing the temporal column; preserve the other columns.
+for ds in (violation_ds, violation_scoped_ds):
+    api("PUT", f"dataset/{ds}/refresh")
+    columns = api("GET", f"dataset/{ds}")["result"]["columns"]
+    occurred_at = next(col for col in columns if col["column_name"] == "occurred_at")
+    api("PUT", f"dataset/{ds}?override_columns=false", json={
+        "main_dttm_col": "occurred_at",
+        "columns": [{"id": occurred_at["id"], "column_name": "occurred_at", "is_dttm": True}],
+    })
 
 # ---------- metrics & helpers ----------
 def metric(sql, label):
@@ -78,6 +92,8 @@ RATE = metric("AVG(is_violation)", "نرخ تخلف")
 VEHICLES = metric("COUNT(DISTINCT device_id)", "خودروهای پایش‌شده")
 DRIVERS = metric("COUNT(DISTINCT driver_id)", "رانندگان")
 ONLY_VIOLATIONS = [{"expressionType": "SQL", "clause": "WHERE", "sqlExpression": "is_violation = 1"}]
+TIME_FILTER = {"expressionType": "SIMPLE", "subject": "occurred_at", "operator": "TEMPORAL_RANGE",
+               "comparator": "No filter", "clause": "WHERE"}
 
 # Qom <-> Tehran freeway corridor
 VIEWPORT = {"longitude": 51.05, "latitude": 35.1, "zoom": 8.6, "bearing": 0, "pitch": 0}
@@ -88,6 +104,8 @@ SPATIAL = {"type": "latlong", "latCol": "lat_grid", "lonCol": "lon_grid"}
 def chart(name, viz, params, ds):
     cid = find("chart", "slice_name", name)
     params = {"viz_type": viz, "datasource": f"{ds}__table", "adhoc_filters": [], **params}
+    if ds in (violation_ds, violation_scoped_ds):
+        params["adhoc_filters"] = [*params["adhoc_filters"], TIME_FILTER]
     body = {"slice_name": name, "viz_type": viz, "datasource_id": ds, "datasource_type": "table",
             "params": json.dumps(params)}
     if cid:
@@ -277,7 +295,13 @@ def build_dashboard(ds, slug, title, suffix="", extra_fleet_row=None):
                 "chartsInScope": [cid for k, cid in charts.items() if k not in (extra_fleet_row or {})], "tabsInScope": list(tabs), "description": ""}
 
     filters = [select_filter("NATIVE_FILTER-company", "پلیس استان", "company"),
-               select_filter("NATIVE_FILTER-date", "تاریخ (شمسی)", "jalali_date"),
+               {"id": "NATIVE_FILTER-time", "name": "تاریخ", "filterType": "filter_time", "type": "NATIVE_FILTER",
+                "targets": [{}], "controlValues": {"enableEmptyFilter": False},
+                "defaultDataMask": {"extraFormData": {}, "filterState": {}, "ownState": {}},
+                "cascadeParentIds": [], "scope": {"rootPath": ["ROOT_ID"],
+                                                   "excluded": list((extra_fleet_row or {}).values())},
+                "chartsInScope": [cid for k, cid in charts.items() if k not in (extra_fleet_row or {})],
+                "tabsInScope": list(tabs), "description": ""},
                select_filter("NATIVE_FILTER-status", "وضعیت", "status"),
                select_filter("NATIVE_FILTER-road", "محور", "location"),
                select_filter("NATIVE_FILTER-model", "مدل خودرو", "vehicle_model")]
