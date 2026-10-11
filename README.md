@@ -10,13 +10,59 @@ Open the host app to pick a user from `um."User"` and a company from `um."Compan
 
 `traffic-fa` is the same charts for a direct Superset login. A login whose username matches `um."User"."UserName"` sees that user's company subtree.
 
-The Jalali SQL macros are installed in the Superset image (`packages/superset-jalali-sql`) and registered in `superset/superset_config.py`. Use them on any virtual dataset:
+## Jalali dates
+
+The image installs [superset-jalali](https://github.com/alip990/superset-jalali), pinned by
+`SUPERSET_JALALI_REF` in `superset/Dockerfile` to
+`14a7a6a6af81a538afa53c69dced44f687ace8ac`. A Node 22 stage builds its frontend;
+a Python 3.11 stage builds the wheel and checks that its manifest and named JS bundle
+are included. The final Superset 6.1.0 stage installs that wheel. Once the package
+is published on PyPI, replace the two build stages with a pinned package install.
+
+Keep these as the **last two lines** of `superset/superset_config.py` so the plugin
+merges the existing feature flags and `get_guest_user_attribute` Jinja helper:
+
+```python
+from superset_jalali import init_jalali
+init_jalali(globals())
+```
+
+`JALALI = {"sql_min_year": 1400, "sql_max_year": 1410}` limits the SQL calendar join
+for the backup's 1403–1404 data. Dates outside this window have NULL display columns.
+The picker has its own wider calendar. `TZ=Asia/Tehran` keeps rolling presets on
+Tehran's server date.
+
+Both `violation_jalali` and `violation_scoped` are virtual datasets using this pair:
 
 ```sql
-SELECT s.*, {{ jalali_columns('s.sale_date') }}
-FROM sales s
-{{ jalali_join('s.sale_date') }}
+SELECT v.*, {{ jalali_columns('v.occurred_at') }}
+FROM bi.violation v
+{{ jalali_join('v.occurred_at') }}
 ```
+
+`occurred_at` is already Tehran local time without a timezone. The scoped dataset
+adds the existing guest company list with `get_guest_user_attribute`, `where_in`,
+and an empty-list condition that returns no rows. Its cache keys include that list.
+
+The macros provide `jalali_year`, `jalali_month_num`, `jalali_day`, `jalali_date`
+(`1403/07/18`), `jalali_date_int`, `jalali_month` (`1403-07`), `jalali_month_name`,
+`jalali_month_label`, `jalali_season`, `jalali_season_key`, `jalali_weekday`,
+`jalali_weekday_num` (Saturday = 0), and `jalali_week_start` (Gregorian Saturday).
+Sort weekday labels by `jalali_weekday_num`. The BI table stores only Gregorian dates.
+
+The «تاریخ» Time range filter in both dashboards uses the Jalali calendar, including
+inside the embedded app. Its end date is inclusive: 1404/01/01–1404/01/31 filters
+`occurred_at >= '2025-03-21' AND occurred_at < '2025-04-21'`.
+**Every traffic chart, including deck.gl maps, must keep the `occurred_at`
+`TEMPORAL_RANGE` time pill with comparator `No filter`**, and `occurred_at` must
+remain the dataset's temporal default column. The date-less «ناوگان ثبت‌شده» fleet
+chart has no time pill and is excluded from time filter scope.
+
+Explore keeps Superset's Gregorian picker. Calendar presets such as «این ماه» save
+fixed dates; rolling presets such as «۷ روز اخیر» follow today and may return no
+rows for this historical backup. To restore the stock dashboard picker, add
+`"datefilter_enabled": False` to `JALALI`, restart Superset, and fully reload.
+The macros and saved ranges still work.
 
 ## Start
 
@@ -38,7 +84,40 @@ superset/bootstrap_traffic.py vehicle dashboard
 db/01-init.sql                Superset metadata database
 backups/restore.sh            loads 1may-backup.sql
 backups/02-bi.sql             bi.vehicle and bi.violation; companies and users stay in the backup
-packages/superset-jalali-sql  calendar macros
+superset-jalali              installed plugin (pinned wheel built in Docker)
 ```
 
-Logins `traffic_national`, `traffic_qom`, and `traffic_tehran` use the same word as the password. Each sees its company and the companies below it.
+For this demo, bootstrap creates direct Superset logins for the backup's active users,
+with the username as the password and the `TrafficCompanyUser` role. For example,
+`navidahmadian` sees the Qom company subtree, `fkreza90` the Tehran subtree, and
+`fkreza` the national subtree. The host picker continues to use the backup users and
+companies directly. These are demo credentials.
+
+## Upgrade the Jalali integration on existing volumes
+
+Keep the restored backup volume. Rebuild the images, recreate only the BI layer,
+then reset only Superset metadata (old datasets refer to removed display columns).
+The metadata reset deletes local Superset users and custom dashboards; bootstrap
+recreates the two demo dashboards, direct demo users, and their access rules.
+
+```bash
+docker compose build superset-init superset superset-bootstrap embed-app
+docker compose stop superset embed-app
+docker compose exec -T backup-db psql -U postgres < backups/02-bi.sql
+docker compose rm -sf db
+docker volume rm superset-demo_pgdata
+docker compose up -d
+docker compose logs -f superset-bootstrap
+```
+
+Wait for `TRAFFIC_BOOTSTRAP_DONE`. Do not remove `superset-demo_backupdata` or use
+`docker compose down -v` during this upgrade: the large dump does not need restoring.
+
+```bash
+curl -f http://localhost:8088/superset-jalali/health
+```
+
+Logged-in `/dynamic-plugins/api/read` should return HTTP 200 with one plugin.
+
+Picker screenshots: [Superset](docs/screenshots/superset-jalali-picker.png) and
+[embedded app](docs/screenshots/embedded-jalali-picker.png).

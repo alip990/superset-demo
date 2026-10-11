@@ -5,6 +5,7 @@ x-superset: &superset
   build: {context: ., dockerfile: superset/Dockerfile}
   environment:
     SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+    TZ: Asia/Tehran
   volumes:
     - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
     - ./superset/guest_user_attributes.py:/app/pythonpath/guest_user_attributes.py:ro
@@ -62,6 +63,7 @@ services:
       - ./superset/bootstrap_traffic.py:/app/bootstrap_traffic.py:ro
     environment:
       SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      TZ: Asia/Tehran
       SUPERSET_URL: http://superset:8088
       MAP_TILE_URL: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
     depends_on:
