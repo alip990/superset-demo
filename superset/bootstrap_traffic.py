@@ -5,6 +5,7 @@ The embedded copy filters with get_guest_user_attribute('allowed_companies').
 A direct login whose username matches um."User" sees that company and every company below it.
 """
 import json, os
+import psycopg2
 import requests
 
 URL = os.environ.get("SUPERSET_URL", "http://superset:8088")
@@ -367,9 +368,11 @@ with app.app_context():
     if pv:
         sm.add_permission_role(role, pv)
 
-    # Recreate the existing demo logins after a metadata-only reset.
-    # Company RLS still requires a matching username in the backup's um.User.
-    for username in ("traffic_national", "traffic_qom", "traffic_tehran"):
+    # Demo logins match real backup usernames so the company-tree RLS can resolve them.
+    with psycopg2.connect("postgresql://bi_reader:bi_reader@backup-db:5432/CrimeManagementDb") as conn, conn.cursor() as cur:
+        cur.execute('SELECT "UserName" FROM um_src."User" WHERE NOT "Deleted" AND "Activated"')
+        usernames = [row[0] for row in cur.fetchall()]
+    for username in usernames:
         if not sm.find_user(username=username):
             sm.add_user(username, "Traffic", username, f"{username}@example.com", role, password=username)
 
