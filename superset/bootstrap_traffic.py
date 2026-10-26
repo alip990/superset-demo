@@ -4,7 +4,7 @@ Company and user rows stay in UserManagementDb (um."Company", um."User").
 The embedded copy filters with get_guest_user_attribute('allowed_companies').
 A direct login whose username matches um."User" sees that company and every company below it.
 """
-import json, os
+import json, os, subprocess
 import psycopg2
 import requests
 
@@ -58,13 +58,16 @@ def dataset(name, sql=None, schema="bi"):
     return api("POST", "dataset/", json=body)["id"]
 
 
-VIOLATION_SQL = """SELECT v.*, {{ jalali_columns('v.occurred_at') }}
-FROM bi.violation v
-{{ jalali_join('v.occurred_at') }}"""
-
-violation_ds = dataset("violation_jalali", sql=VIOLATION_SQL)
+# Direct logins: the physical table, with Jalali calculated columns added by the plugin's CLI.
+violation_ds = dataset("violation")
+api("PUT", f"dataset/{violation_ds}", json={"main_dttm_col": "occurred_at"})
+subprocess.run(["superset", "jalali", "add-columns", "--dataset", str(violation_ds), "--column", "occurred_at"],
+               check=True)
 vehicle_ds = dataset("vehicle")
-violation_scoped_ds = dataset("violation_scoped", sql=VIOLATION_SQL + """
+# Embedded: a virtual dataset, because the guest's company list is applied in its SQL.
+violation_scoped_ds = dataset("violation_scoped", sql="""SELECT v.*, {{ jalali_columns('v.occurred_at') }}
+FROM bi.violation v
+{{ jalali_join('v.occurred_at') }}
 WHERE 1=1
 {% set allowed_companies = get_guest_user_attribute('allowed_companies', escape_result=False) %}
 {% if allowed_companies %}
@@ -74,15 +77,14 @@ WHERE 1=1
 {% endif %}""")
 
 # Sync virtual columns before choosing the temporal column; preserve the other columns.
-for ds in (violation_ds, violation_scoped_ds):
-    api("PUT", f"dataset/{ds}/refresh")
-    columns = api("GET", f"dataset/{ds}")["result"]["columns"]
-    api("PUT", f"dataset/{ds}?override_columns=false", json={
-        "main_dttm_col": "occurred_at",
-        "columns": [{"id": col["id"], "column_name": col["column_name"],
-                     "is_dttm": True if col["column_name"] == "occurred_at" else col["is_dttm"]}
-                    for col in columns],
-    })
+api("PUT", f"dataset/{violation_scoped_ds}/refresh")
+columns = api("GET", f"dataset/{violation_scoped_ds}")["result"]["columns"]
+api("PUT", f"dataset/{violation_scoped_ds}?override_columns=false", json={
+    "main_dttm_col": "occurred_at",
+    "columns": [{"id": col["id"], "column_name": col["column_name"],
+                 "is_dttm": True if col["column_name"] == "occurred_at" else col["is_dttm"]}
+                for col in columns],
+})
 
 # ---------- metrics & helpers ----------
 def metric(sql, label):
