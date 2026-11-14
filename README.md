@@ -14,7 +14,7 @@ Open the host app to pick a user from `um."User"` and a company from `um."Compan
 
 The image installs [superset-jalali](https://github.com/alip990/superset-jalali), pinned by
 `SUPERSET_JALALI_REF` in `superset/Dockerfile` to
-`50a28279a604abad5cfb8edddad12747b17c9260`. A Node 22 stage builds its frontend;
+`9b38c98122162a0bd544456ed6f0ddcd6567024c`. A Node 22 stage builds its frontend;
 a Python 3.11 stage builds the wheel and checks that its manifest and named JS bundle
 are included. The final Superset 6.1.0 stage installs that wheel. Once the package
 is published on PyPI, replace the two build stages with a pinned package install.
@@ -60,8 +60,15 @@ and an empty-list condition that returns no rows. Its cache keys include that li
 The macros provide `jalali_year`, `jalali_month_num`, `jalali_day`, `jalali_date`
 (`1403/07/18`), `jalali_date_int`, `jalali_month` (`1403-07`), `jalali_month_name`,
 `jalali_month_label`, `jalali_season`, `jalali_season_key`, `jalali_weekday`,
-`jalali_weekday_num` (Saturday = 0), and `jalali_week_start` (Gregorian Saturday).
-Sort weekday labels by `jalali_weekday_num`. The BI table stores only Gregorian dates.
+`jalali_weekday_num` (Saturday = 0), `jalali_week_start` (Gregorian Saturday, a real
+date), `jalali_week_start_date` (the same Saturday in Jalali, `1403/07/14`; use it for
+weekly charts) and `jalali_weekday_key` (`1 شنبه` … `7 جمعه`, sorts Saturday→Friday).
+The BI table stores only Gregorian dates.
+
+The overview tab has two heatmaps: «نقشه حرارتی روز × ساعت» (`hour_of_day` ×
+`jalali_date`) and «نقشه حرارتی روز هفته × ماه» (`jalali_weekday_key` ×
+`jalali_month_label`), both sorted *Axis ascending*. The «تاریخ» filter can also take a
+time of day («با ساعت»), which suits the `occurred_at` timestamp.
 
 The «تاریخ» Time range filter in both dashboards uses the Jalali calendar, including
 inside the embedded app. Its end date is inclusive: 1404/01/01–1404/01/31 filters

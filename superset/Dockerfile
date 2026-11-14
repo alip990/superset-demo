@@ -1,4 +1,4 @@
-ARG SUPERSET_JALALI_REF=50a28279a604abad5cfb8edddad12747b17c9260
+ARG SUPERSET_JALALI_REF=9b38c98122162a0bd544456ed6f0ddcd6567024c
 
 # Once superset-jalali is on PyPI, replace the two build stages with
 # uv pip install superset-jalali==<version> in Superset's Python environment.
