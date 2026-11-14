@@ -14,7 +14,7 @@ Open the host app to pick a user from `um."User"` and a company from `um."Compan
 
 The image installs [superset-jalali](https://github.com/alip990/superset-jalali), pinned by
 `SUPERSET_JALALI_REF` in `superset/Dockerfile` to
-`14a7a6a6af81a538afa53c69dced44f687ace8ac`. A Node 22 stage builds its frontend;
+`9b38c98122162a0bd544456ed6f0ddcd6567024c`. A Node 22 stage builds its frontend;
 a Python 3.11 stage builds the wheel and checks that its manifest and named JS bundle
 are included. The final Superset 6.1.0 stage installs that wheel. Once the package
 is published on PyPI, replace the two build stages with a pinned package install.
@@ -32,12 +32,25 @@ for the backup's 1403–1404 data. Dates outside this window have NULL display c
 The picker has its own wider calendar. `TZ=Asia/Tehran` keeps rolling presets on
 Tehran's server date.
 
-Both `violation_jalali` and `violation_scoped` are virtual datasets using this pair:
+The direct-login dashboard uses the **physical** dataset `bi.violation`. Bootstrap
+adds the plugin's Jalali calculated columns to it on `occurred_at`:
+
+```bash
+superset jalali add-columns --dataset <id of bi.violation> --column occurred_at
+```
+
+Each column is one expression such as `{{ jalali('occurred_at', 'month_label') }}`;
+no SQL is needed and the column names are the same as before (`jalali_*`).
+`occurred_at` stays the dataset's temporal default column.
+
+The embedded dashboard keeps the **virtual** dataset `violation_scoped`, because the
+guest's company list is applied in its SQL:
 
 ```sql
 SELECT v.*, {{ jalali_columns('v.occurred_at') }}
 FROM bi.violation v
 {{ jalali_join('v.occurred_at') }}
+WHERE 1=1 ... -- get_guest_user_attribute('allowed_companies')
 ```
 
 `occurred_at` is already Tehran local time without a timezone. The scoped dataset
@@ -47,8 +60,15 @@ and an empty-list condition that returns no rows. Its cache keys include that li
 The macros provide `jalali_year`, `jalali_month_num`, `jalali_day`, `jalali_date`
 (`1403/07/18`), `jalali_date_int`, `jalali_month` (`1403-07`), `jalali_month_name`,
 `jalali_month_label`, `jalali_season`, `jalali_season_key`, `jalali_weekday`,
-`jalali_weekday_num` (Saturday = 0), and `jalali_week_start` (Gregorian Saturday).
-Sort weekday labels by `jalali_weekday_num`. The BI table stores only Gregorian dates.
+`jalali_weekday_num` (Saturday = 0), `jalali_week_start` (Gregorian Saturday, a real
+date), `jalali_week_start_date` (the same Saturday in Jalali, `1403/07/14`; use it for
+weekly charts) and `jalali_weekday_key` (`1 شنبه` … `7 جمعه`, sorts Saturday→Friday).
+The BI table stores only Gregorian dates.
+
+The overview tab has two heatmaps: «نقشه حرارتی روز × ساعت» (`hour_of_day` ×
+`jalali_date`) and «نقشه حرارتی روز هفته × ماه» (`jalali_weekday_key` ×
+`jalali_month_label`), both sorted *Axis ascending*. The «تاریخ» filter can also take a
+time of day («با ساعت»), which suits the `occurred_at` timestamp.
 
 The «تاریخ» Time range filter in both dashboards uses the Jalali calendar, including
 inside the embedded app. Its end date is inclusive: 1404/01/01–1404/01/31 filters
@@ -96,7 +116,9 @@ companies directly. These are demo credentials.
 ## Upgrade the Jalali integration on existing volumes
 
 Keep the restored backup volume. Rebuild the images, recreate only the BI layer,
-then reset only Superset metadata (old datasets refer to removed display columns).
+then reset only Superset metadata (old datasets refer to removed display columns,
+and the direct dataset changed from virtual `violation_jalali` to physical
+`bi.violation`).
 The metadata reset deletes local Superset users and custom dashboards; bootstrap
 recreates the two demo dashboards, direct demo users, and their access rules.
 
