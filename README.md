@@ -14,7 +14,7 @@ Open the host app to pick a user from `um."User"` and a company from `um."Compan
 
 The image installs [superset-jalali](https://github.com/alip990/superset-jalali), pinned by
 `SUPERSET_JALALI_REF` in `superset/Dockerfile` to
-`9b38c98122162a0bd544456ed6f0ddcd6567024c`. A Node 22 stage builds its frontend;
+`6995b31d9e08a2ef574f5682c43081fe1eb04387`. A Node 22 stage builds its frontend;
 a Python 3.11 stage builds the wheel and checks that its manifest and named JS bundle
 are included. The final Superset 6.1.0 stage installs that wheel. Once the package
 is published on PyPI, replace the two build stages with a pinned package install.
