@@ -39,8 +39,8 @@ adds the plugin's Jalali calculated columns to it on `occurred_at`:
 superset jalali add-columns --dataset <id of bi.violation> --column occurred_at
 ```
 
-Each column is one expression such as `{{ jalali('occurred_at', 'month_label') }}`;
-no SQL is needed and the column names are the same as before (`jalali_*`).
+Each column is one expression such as `{{ jalali('occurred_at', 'month_name') }}`;
+no SQL is needed.
 `occurred_at` stays the dataset's temporal default column.
 
 The embedded dashboard keeps the **virtual** dataset `violation_scoped`, because the
@@ -57,17 +57,17 @@ WHERE 1=1 ... -- get_guest_user_attribute('allowed_companies')
 adds the existing guest company list with `get_guest_user_attribute`, `where_in`,
 and an empty-list condition that returns no rows. Its cache keys include that list.
 
-The macros provide `jalali_year`, `jalali_month_num`, `jalali_day`, `jalali_date`
-(`1403/07/18`), `jalali_date_int`, `jalali_month` (`1403-07`), `jalali_month_name`,
-`jalali_month_label`, `jalali_season`, `jalali_season_key`, `jalali_weekday`,
-`jalali_weekday_num` (Saturday = 0), `jalali_week_start` (Gregorian Saturday, a real
-date), `jalali_week_start_date` (the same Saturday in Jalali, `1403/07/14`; use it for
-weekly charts) and `jalali_weekday_key` (`1 شنبه` … `7 جمعه`, sorts Saturday→Friday).
+The plugin provides `jalali_year`, `jalali_month_num`, `jalali_day`, `jalali_date`
+(`1403/07/18`), `jalali_date_int`, `jalali_month_name`, `jalali_season`, `jalali_weekday`,
+`jalali_weekday_num` (Saturday = 1 … Friday = 7), `jalali_week_of_year` (week 1 contains
+1 Farvardin), `week_start` (the Saturday as Gregorian text, `2024-10-05`; no `jalali_`
+prefix) and `jalali_week_start_date` (the same Saturday in Jalali, `1403/07/14`). Use either
+`week_start` column for weekly charts.
 The BI table stores only Gregorian dates.
 
 The overview tab has two heatmaps: «نقشه حرارتی روز × ساعت» (`hour_of_day` ×
-`jalali_date`) and «نقشه حرارتی روز هفته × ماه» (`jalali_weekday_key` ×
-`jalali_month_label`), both sorted *Axis ascending*. The «تاریخ» filter can also take a
+`jalali_date`) and «نقشه حرارتی روز هفته × ماه» (`jalali_weekday_num` ×
+`jalali_month_num`), both sorted *Axis ascending*. The «تاریخ» filter can also take a
 time of day («با ساعت»), which suits the `occurred_at` timestamp.
 
 The «تاریخ» Time range filter in both dashboards uses the Jalali calendar, including
