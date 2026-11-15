@@ -182,13 +182,22 @@ def make_charts(ds, suffix, names):
             "sort_y_axis": "alpha_asc", "left_margin": "auto", "bottom_margin": "auto", "xscale_interval": -1,
             "yscale_interval": -1, "y_axis_format": "SMART_NUMBER", "value_bounds": [None, None],
         }),
+        # weekday_num: 1 = Saturday … 7 = Friday; both axes are numbers, so "Axis ascending" sorts them in order.
         "weekday_month": c("نقشه حرارتی روز هفته × ماه", "heatmap_v2", {
-            "x_axis": "jalali_weekday_key", "groupby": "jalali_month_label", "metric": VIOLATIONS,
+            "x_axis": "jalali_weekday_num", "groupby": "jalali_month_num", "metric": VIOLATIONS,
             "row_limit": 10000, "linear_color_scheme": "red_yellow_blue", "normalize_across": "heatmap",
             "legend_type": "continuous", "show_legend": True, "show_values": True, "show_percentage": False,
             "sort_x_axis": "alpha_asc", "sort_y_axis": "alpha_asc", "left_margin": "auto",
             "bottom_margin": "auto", "xscale_interval": -1, "yscale_interval": -1,
             "y_axis_format": "SMART_NUMBER", "value_bounds": [None, None],
+        }),
+        # Superset's stock Calendar Heatmap (cal_heatmap): Gregorian month blocks, shown only to check its type.
+        "cal_heatmap": c("نقشه حرارتی تقویم (نوع پیش‌فرض سوپرست)", "cal_heatmap", {
+            "granularity_sqla": "occurred_at", "time_grain_sqla": "P1D", "time_range": "2025-01-20 : 2025-05-10",
+            "domain_granularity": "month", "subdomain_granularity": "day", "metrics": [CHECKS],
+            "linear_color_scheme": "blue_white_yellow", "cell_size": 14, "cell_padding": 2, "cell_radius": 0,
+            "steps": 10, "y_axis_format": "SMART_NUMBER", "show_legend": True, "show_values": False,
+            "show_metric_name": True, "x_axis_time_format": "jalali_date",
         }),
         # ---- maps ----
         "hex": c("نقشه سه‌بعدی کانون‌های تخلف", "deck_hex", {
@@ -289,6 +298,7 @@ def build_dashboard(ds, slug, title, suffix="", extra_fleet_row=None):
     row("ROW-o2", T + ["TAB-overview"], [("daily", 6, 70), ("hourly", 6, 70)])
     row("ROW-o3", T + ["TAB-overview"], [("day_hour", 12, 60)])
     row("ROW-o4", T + ["TAB-overview"], [("weekday_month", 12, 50)])
+    row("ROW-o5", T + ["TAB-overview"], [("cal_heatmap", 12, 50)])
     row("ROW-m1", T + ["TAB-maps"], [("hex", 12, 110)])
     row("ROW-m2", T + ["TAB-maps"], [("heat", 6, 90), ("scatter", 6, 90)])
     row("ROW-f1", T + ["TAB-fleet"], [("roads", 6, 70), ("treemap", 6, 70)])
