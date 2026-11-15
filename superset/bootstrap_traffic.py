@@ -182,8 +182,9 @@ def make_charts(ds, suffix, names):
             "sort_y_axis": "alpha_asc", "left_margin": "auto", "bottom_margin": "auto", "xscale_interval": -1,
             "yscale_interval": -1, "y_axis_format": "SMART_NUMBER", "value_bounds": [None, None],
         }),
+        # weekday_num: 1 = Saturday … 7 = Friday; both axes are numbers, so "Axis ascending" sorts them in order.
         "weekday_month": c("نقشه حرارتی روز هفته × ماه", "heatmap_v2", {
-            "x_axis": "jalali_weekday_key", "groupby": "jalali_month_label", "metric": VIOLATIONS,
+            "x_axis": "jalali_weekday_num", "groupby": "jalali_month_num", "metric": VIOLATIONS,
             "row_limit": 10000, "linear_color_scheme": "red_yellow_blue", "normalize_across": "heatmap",
             "legend_type": "continuous", "show_legend": True, "show_values": True, "show_percentage": False,
             "sort_x_axis": "alpha_asc", "sort_y_axis": "alpha_asc", "left_margin": "auto",
